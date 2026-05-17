@@ -4,6 +4,117 @@ Reverse-chronological. Newest entries on top. Each entry: timestamp, what shippe
 
 ---
 
+## 2026-05-17 — Run 4: milestone system
+
+**Shipped**
+- `src/milestones/` module with the same pure-vs-IO split the matching
+  layer uses:
+  - `types.ts` — `MessageForDepth`, `MessageForUnlock`,
+    `UnlockThreshold`, `ConversationDepthStats`, plus
+    `DEFAULT_UNLOCK_THRESHOLDS`:
+      - AGE: total >=10, per-side >=4, avgDepth >=0.3
+      - PROFESSION: total >=25, per-side >=10, avgDepth >=0.4
+      - HEIGHT: total >=50, per-side >=20, avgDepth >=0.5
+    FACE is intentionally absent — it's owned by the end-of-day
+    resolution flow that lands later.
+  - `depth.ts` — `scoreMessageDepth(input)`. Pure. Weighted sum of:
+    length (saturating `1 - e^(-len/100)`, weight 0.5), meaningful
+    question (`?` plus at least one alnum char, weight 0.25), and
+    reciprocity (response of >=20 chars to the most-recent OTHER-sender
+    question, weight 0.25). Whitespace/empty bodies score 0. Also
+    exports `averageDepthScore` helper. TODO seam left for the
+    LLM-augmented variant — shape stays 0..1.
+  - `unlock.ts` — `nextMilestoneToUnlock(input, thresholds?)`. Pure.
+    Strict ladder: walks `DEFAULT_UNLOCK_THRESHOLDS` in order, returns
+    the first not-yet-unlocked rung whose threshold is met, else `null`.
+    Refuses to skip past an unmet rung (so PROFESSION can't unlock
+    before AGE even if depth is high). `summarize` exposed for callers
+    that want the aggregate stats without the decision.
+  - `prisma-deps.ts` — `recordMilestone(prisma, matchId, milestone)`
+    upserts the `MilestoneProgress` row with an empty `update` branch,
+    so `unlockedAt` is captured on first write and never bumped on
+    repeat calls. `loadUnlockedMilestones(prisma, matchId)` returns the
+    `Set<MilestoneType>` callers feed into the rule. Typed against a
+    narrow `MilestonePrisma` surface so tests can mock without pulling
+    the full client.
+  - `index.ts` barrel exports.
+- Tests (`tests/milestones/`):
+  - `depth.test.ts` (15 tests) — empty/whitespace zeros out; length
+    saturation curve (short < medium < long, short→medium jump bigger
+    than medium→long); lone `?` and `?????` don't earn the question
+    bonus; reciprocity only fires when the most-recent OTHER-sender
+    message contained a meaningful question AND the reply is >=20
+    chars; reciprocity walks past same-sender prior messages; clamps
+    to [0,1]; realistic "substantive reply to a where-you-from?"
+    scores in the 0.5+ range; plus the `averageDepthScore` helper.
+  - `unlock.test.ts` (16 tests) — `summarize` per-side counts +
+    average + ignores outside-pair senders; empty conversation; below
+    AGE on volume, on per-side floor, on depth; AGE unlock at the
+    boundary; ladder doesn't skip ahead; PROFESSION unlock once AGE
+    is in `unlocked`; HEIGHT unlock once AGE+PROFESSION are in;
+    all-unlocked → null; FACE never returned by the ladder
+    (and not in `DEFAULT_UNLOCK_THRESHOLDS` to begin with); custom
+    thresholds respected; stats emitted alongside the decision.
+  - `record.test.ts` (5 tests) — hand-rolled `MilestonePrisma` mock
+    backed by a `Map`. Covers first-write creation, idempotent repeat
+    call (same row, no `unlockedAt` bump), per-matchId scoping, and
+    the `loadUnlockedMilestones` reader.
+- Fixed the pre-existing typecheck issue flagged in run 3: moved
+  `rootDir: "src"` out of base `tsconfig.json` into
+  `tsconfig.build.json` so `tsc --noEmit` covers the test tree without
+  complaint. Build path is unchanged.
+
+**Verified**
+- `npm run typecheck` — clean (was failing before this run).
+- `npm run build` — clean.
+- `npm run lint` — clean.
+- `npm test` — 79/79 pass (was 43/43; +36 new tests).
+- `prisma format` + `prisma validate` — clean (schema untouched).
+
+**Didn't try / deferred**
+- No live DB exercise of `recordMilestone` — still no Docker in this
+  sandbox. Unit-test mock covers the call shape.
+- No callsite wiring yet. The next agent will hook this in when the
+  Twilio inbound webhook lands: on each persisted `Message` (with a
+  pre-computed `depthScore` from `scoreMessageDepth`), call
+  `nextMilestoneToUnlock` and, when it returns non-null, persist via
+  `recordMilestone` and emit the reveal outbound message. Deliberately
+  not wired here because the relay layer doesn't exist yet.
+
+**Blocked on user** — nothing new. `USER_TODO.md` is still accurate.
+
+**Next agent: pick this up**
+- Task: **iMessage relay layer** (Twilio webhooks). Build
+  `src/twilio/`:
+  - `signature.ts`: HMAC-SHA1 X-Twilio-Signature verification per
+    Twilio spec. Pure(ish) — takes `authToken`, `url`, sorted form
+    params, signature header. Unit-testable with a known vector.
+  - `client.ts`: thin outbound wrapper (no SDK dep yet; raw `fetch`
+    to `https://api.twilio.com/...`). Honour `TWILIO_DRY_RUN=true`
+    (default in dev) — log instead of sending. Read creds from
+    `env.ts` (extend the Zod schema; everything optional so the app
+    still boots without Twilio).
+  - `routes.ts` (replaces the current `src/routes/twilio.ts` stub):
+      - `POST /webhooks/twilio/inbound`: verify signature (skip in
+        dev if creds missing — log a warning), look up sender by
+        `From` phone, route through the conversation state machine
+        (next bullet), reply with empty TwiML.
+      - `POST /webhooks/twilio/status`: persist delivery state
+        against `Message.twilioSid`; 204.
+  - `conversation.ts`: pure state machine — given `(user, body,
+    activeMatch?)`, return `{ outboundsToSend: OutboundAction[],
+    persist: Message }`. ONBOARDING users go through the onboarding
+    SM; ACTIVE users with an open match get message-relayed to the
+    partner (with depth scored + milestone-unlock check inline);
+    no-active-match users get a friendly "your match drops at 5pm"
+    style reply.
+  - Wire `src/app.ts` to mount the new routes.
+- Tests: signature vector(s); `conversation.ts` for each branch
+  (onboarding stub, ACTIVE relay, no-match holding pattern).
+- Update `GOAL.md` (check off) + `PROGRESS.md`.
+
+---
+
 ## 2026-05-17 — Run 3: matching algorithm v1
 
 **Shipped**
