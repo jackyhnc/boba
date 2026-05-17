@@ -736,3 +736,29 @@ expanded the Twilio-console section so they have a clear checklist.
 
 **Next agent: pick this up**
 - Deploy configs (Dockerfile, render.yaml, fly.toml, /readyz endpoint), GitHub Actions CI, Sentry hooks, DEPLOY.md.
+
+---
+
+## 2026-05-17T19:44Z — Deploy configs + CI + Sentry + /readyz + DEPLOY.md
+
+**Shipped**
+- `/readyz` endpoint (Postgres ping, 503 on failure) alongside existing `/health`. Test override `BuildAppOptions.health.pingDb` so suites don't need a real DB.
+- `src/observability/sentry.ts`: idempotent `initSentry({env})` (no-op when `SENTRY_DSN` empty). `attachFastifySentry(app)` forwards onError to `captureException` with route tags.
+- `src/server.ts` initializes Sentry before `buildApp`.
+- `Dockerfile`: 3-stage Node 22 build (deps → build → slim runtime). Drops privileges to uid 10001. `CMD` runs `prisma migrate deploy && node dist/server.js`.
+- `.dockerignore`: excludes node_modules / tests / progress docs.
+- `render.yaml`: blueprint with managed Postgres + web service, generates `ADMIN_TOKEN`, `sync: false` markers for human-supplied secrets.
+- `fly.toml`: Fly app config with `/health` + `/readyz` checks, `release_command = prisma migrate deploy`, single shared-cpu VM.
+- `.github/workflows/ci.yml`: typecheck + lint + test + build + Docker build (load only, no push). Runs on PR and push to main.
+- `DEPLOY.md`: full human walkthrough — entity formation, Twilio + 10DLC, hosting choice, DNS, secrets matrix, webhook wiring, seed/smoke, monitoring, troubleshooting.
+- `USER_TODO.md`: rewritten as a launch punch list (hard blockers + optional + "already done by the agent").
+- Added `@sentry/node` dependency.
+
+**Tests**
+- `tests/observability/sentry.test.ts` (3): no-op without DSN, init with DSN+sample rate, idempotent.
+- `tests/health.test.ts`: extended with `/readyz` ready + 503 paths.
+
+**Verified**
+- typecheck, test (256/256), build, lint all clean.
+
+**Done.** All 8 phase-2 launch items are checked off. `USER_TODO.md` is the only thing left for the human.

@@ -1,46 +1,76 @@
 # User TODO
 
-Things only the human can do. Keep this list current — each overnight run should append/refresh.
+Things only **you** can do — the agent can write code, but it can't sign legal documents, pay for accounts, or hand over your own API keys. Everything below is required to launch.
 
-## Required before production
-- [ ] **Twilio account + phone number.** Sign up at https://www.twilio.com, buy a US long code or short code, enable SMS. We will need:
-  - Account SID
-  - Auth Token
-  - Phone number (E.164 format, e.g. `+15555550123`)
-  - Messaging Service SID (optional, recommended for scale)
-- [ ] **Decide university for Phase 1.** Geographic / domain whitelist will key off this (e.g. `@stanford.edu`).
-- [ ] **Domain name** for the webhook endpoint Twilio will POST to (e.g. `api.boba.app`). Needs HTTPS.
-- [ ] **Production Postgres host** (Neon, Supabase, RDS, etc.). Local dev uses docker-compose.
-- [ ] **Apple Developer account** — only required if/when we build a companion iOS app. The MVP is SMS-only so this can wait.
-- [ ] **LLM provider key** (Anthropic or OpenAI) only when AI seeding is turned on. Disabled by default; not required for MVP.
+See [DEPLOY.md](./DEPLOY.md) for the end-to-end deploy walkthrough; this file is the punch list of what to acquire / sign up for *before* you deploy.
 
-## Env vars the user supplies
-Once accounts exist, copy `.env.example` → `.env` and fill in:
-- `DATABASE_URL`
-- `TWILIO_ACCOUNT_SID`
-- `TWILIO_AUTH_TOKEN`
-- `TWILIO_PHONE_NUMBER`
-- `TWILIO_MESSAGING_SERVICE_SID` (optional)
-- `PUBLIC_WEBHOOK_BASE_URL` — MUST exactly match what's set in the Twilio
-  console webhook URL. The X-Twilio-Signature is computed over it; any
-  mismatch (trailing slash, http vs https, wrong host) causes 403s.
-- `TWILIO_DRY_RUN` — defaults to `true`. Set to `false` to actually send.
-- `TWILIO_REQUIRE_SIGNATURE` — defaults to `false`. Set to `true` in
-  production (enforces signature verification even if creds drift).
-- `ANTHROPIC_API_KEY` (optional, only for AI seeding)
+---
 
-## Twilio console setup
-Once you've bought a number and have credentials:
-1. In the Twilio console, go to your phone number's "Messaging" section.
-2. Under "A message comes in", select **Webhook**, method **HTTP POST**,
-   and paste `https://<your-host>/webhooks/twilio/inbound`.
-3. Under "Status callback URL" paste
-   `https://<your-host>/webhooks/twilio/status` (POST).
-4. Make sure `PUBLIC_WEBHOOK_BASE_URL` in your `.env` is the same origin
-   (scheme + host) as the URLs above. The signature won't validate otherwise.
-5. Flip `TWILIO_DRY_RUN=false` and `TWILIO_REQUIRE_SIGNATURE=true` for
-   real traffic.
+## Hard blockers (must complete before launch)
 
-## Deploy
-- [ ] Pick a host (Fly.io, Render, Railway). The app is a single Fastify process + Postgres.
-- [ ] Set up DNS for the chosen domain and point Twilio messaging webhook at `https://<host>/webhooks/twilio/inbound`.
+### Business + compliance
+- [ ] **Form an LLC.** Required for Twilio 10DLC. ~$100 via Stripe Atlas, or $50–300 via your state. Takes ~1 week.
+- [ ] **Write Privacy Policy + Terms of Service.** Required by Twilio 10DLC and by Apple if you ever ship an app. Easiest path: [Termly](https://termly.io) or [iubenda](https://iubenda.com) — ~$10/mo, takes an hour. Host them at `boba.dating/privacy` and `boba.dating/terms` (or similar).
+
+### Twilio
+- [ ] **Sign up for [Twilio](https://www.twilio.com/try-twilio).**
+- [ ] **Buy a US long code phone number** with SMS *and* MMS enabled. ~$1/mo.
+- [ ] **Register for A2P 10DLC** (Twilio console → Messaging → Regulatory Compliance). 1–3 business day approval. Without this, US carriers filter your messages. This is the longest-pole item — start it day one.
+- [ ] Once approved, get from the Twilio console and put in your host's secrets:
+  - `TWILIO_ACCOUNT_SID` (starts `AC…`)
+  - `TWILIO_AUTH_TOKEN`
+  - `TWILIO_PHONE_NUMBER` (E.164, e.g. `+15555550123`)
+  - `TWILIO_MESSAGING_SERVICE_SID` (recommended for scale)
+
+### Infra
+- [ ] **Buy a domain.** `boba.dating` / `getboba.app` / whatever you want. ~$10–15/yr from [Namecheap](https://namecheap.com), [Cloudflare](https://cloudflare.com), [Porkbun](https://porkbun.com).
+- [ ] **Pick a host: Render or Fly.io.** Both ship in this repo. Render is one click via `render.yaml`. Fly is CLI-first via `fly.toml`. Costs ~$5–15/mo.
+- [ ] **Production Postgres.** Auto-provisioned by Render's blueprint (free tier OK for beta). Fly: `flyctl postgres create`. Avoid using your laptop for prod.
+- [ ] **Generate an `ADMIN_TOKEN`** for the `/admin/*` endpoints. Run locally: `openssl rand -hex 32`. Treat it like a password.
+
+### Twilio webhooks
+- [ ] **Wire the webhook URLs in Twilio.** After your host is up:
+  - "A message comes in" → POST `https://<your-host>/webhooks/twilio/inbound`
+  - "Status callback URL" → POST `https://<your-host>/webhooks/twilio/status`
+- [ ] Set `PUBLIC_WEBHOOK_BASE_URL` to **exactly** the origin you put in Twilio (https, no trailing slash). Signature verification depends on character-perfect match.
+
+---
+
+## Optional
+
+### AI seeding (cold-start cover)
+- [ ] [Anthropic Console](https://console.anthropic.com) account.
+- [ ] Generate an API key → set `ANTHROPIC_API_KEY` secret.
+- [ ] Flip `AI_SEEDING_ENABLED=true`.
+- [ ] Decide on the ethics story before turning it on (PRD open question).
+
+### Error monitoring
+- [ ] [Sentry](https://sentry.io) project (free tier OK).
+- [ ] Set `SENTRY_DSN` secret. Sample rate already defaults to 10% — adjust `SENTRY_TRACES_SAMPLE_RATE` if needed.
+
+### Apple side (only if/when you ship a native app)
+- [ ] Apple Developer Program ($99/yr). The MVP is SMS-only — this is not required to launch.
+
+---
+
+## What you do NOT need to do
+
+The code already handles all of these — listed so you don't reinvent them:
+
+- ✅ Invite-code system (closed-beta gate)
+- ✅ Onboarding state machine (12 SMS steps, MMS photo upload)
+- ✅ Compatibility scoring + daily-match selector
+- ✅ Conversation relay + milestone reveals
+- ✅ End-of-day Keep/Maybe/Discard resolution + continuation matches
+- ✅ Rematch eligibility (with `hasDiscard` permanent block + 14-day cooldown)
+- ✅ Anti-doxxing + harassment auto-flag
+- ✅ User REPORT keyword + auto-ban at 3 reports
+- ✅ AI-backed user plumbing
+- ✅ Daily-match scheduler (cron) + manual trigger
+- ✅ Admin endpoints (list users, view conversation, ban, run scheduler, bulk invites)
+- ✅ Dockerfile, Render + Fly configs, /readyz health probe
+- ✅ GitHub Actions CI
+- ✅ Sentry hooks (no-op until you set the DSN)
+- ✅ Local seed script (`npm run seed`)
+
+See [DEPLOY.md](./DEPLOY.md) for the deploy walkthrough.

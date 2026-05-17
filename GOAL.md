@@ -31,6 +31,16 @@ Boba is a dating app built around conversation before appearance. Anti-swipe, an
 - AI seeding for cold-start (build the hooks; don't enable by default).
 - Retention loop.
 
+## Launch-ready checklist (phase 2)
+- [x] Invite-code system (schema + redemption flow)
+- [x] Daily-match scheduler (cron + admin trigger)
+- [x] MMS photo upload during onboarding
+- [x] Admin endpoints (list / view / ban / run-match / bulk invites)
+- [x] Deploy configs (Dockerfile, render.yaml, fly.toml, /readyz)
+- [x] GitHub Actions CI
+- [x] Sentry hooks
+- [x] DEPLOY.md + refreshed USER_TODO.md
+
 ## Build checklist
 
 - [x] Scaffold the repo: TypeScript + Node + Fastify + Prisma, folder structure, README, package.json, tsconfig, lint, gitignore, vitest, docker-compose

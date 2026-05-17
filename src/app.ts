@@ -7,6 +7,7 @@ import {
 } from "./admin/routes.js";
 import { loadEnv } from "./config/env.js";
 import { prisma } from "./lib/prisma.js";
+import { attachFastifySentry } from "./observability/sentry.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import {
   runDailyMatch,
@@ -37,6 +38,10 @@ export interface BuildAppOptions {
     /** Force-disable cron registration (tests). */
     autoStart?: boolean;
   };
+  /** Test override for the /readyz Postgres ping. */
+  health?: {
+    pingDb?: () => Promise<void>;
+  };
 }
 
 export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
@@ -65,7 +70,10 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   // Twilio webhooks are application/x-www-form-urlencoded.
   await app.register(formbody);
 
-  await registerHealthRoutes(app);
+  // Sentry hook (no-op when not initialized).
+  attachFastifySentry(app);
+
+  await registerHealthRoutes(app, options.health ?? {});
   await registerTwilioRoutes(app, options.twilio ?? {});
   // Admin routes registered AFTER scheduler decoration so the trigger
   // endpoint can rely on `app.runDailyMatch`.

@@ -1,0 +1,59 @@
+# Fly.io app config for Boba.
+#
+# Setup (run from this repo, after `flyctl auth login`):
+#   flyctl launch --no-deploy --copy-config             # picks up this fly.toml
+#   flyctl postgres create --name boba-pg --region iad  # provision Postgres
+#   flyctl postgres attach boba-pg                       # writes DATABASE_URL secret
+#   flyctl secrets set TWILIO_ACCOUNT_SID=...            # repeat for each (see USER_TODO.md)
+#   flyctl deploy
+#
+# The HTTP service is set up with both a liveness probe (/health) and a
+# readiness probe (/readyz). Fly automatically pulls a new VM out of
+# rotation if readiness fails 3× in a row.
+
+app = "boba"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "3000"
+  NODE_ENV = "production"
+  LOG_LEVEL = "info"
+  TWILIO_DRY_RUN = "false"
+  TWILIO_REQUIRE_SIGNATURE = "true"
+  INVITES_REQUIRED = "true"
+  SCHEDULER_ENABLED = "true"
+  SCHEDULER_CRON = "0 21 * * *"
+  AI_SEEDING_ENABLED = "false"
+  SENTRY_TRACES_SAMPLE_RATE = "0.1"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    timeout = "5s"
+    path = "/health"
+
+  [[http_service.checks]]
+    grace_period = "20s"
+    interval = "30s"
+    method = "GET"
+    timeout = "5s"
+    path = "/readyz"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+
+[deploy]
+  release_command = "npx prisma migrate deploy"

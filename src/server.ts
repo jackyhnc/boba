@@ -1,9 +1,13 @@
 import { buildApp } from "./app.js";
 import { loadEnv } from "./config/env.js";
 import { disconnectPrisma } from "./lib/prisma.js";
+import { initSentry } from "./observability/sentry.js";
 
 async function main(): Promise<void> {
   const env = loadEnv();
+  // Initialize Sentry before any Fastify hooks so error capture is live
+  // from the first request. No-op when SENTRY_DSN is empty.
+  initSentry({ env });
   const app = await buildApp();
 
   const shutdown = async (signal: string): Promise<void> => {
