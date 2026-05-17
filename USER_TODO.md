@@ -21,8 +21,25 @@ Once accounts exist, copy `.env.example` → `.env` and fill in:
 - `TWILIO_AUTH_TOKEN`
 - `TWILIO_PHONE_NUMBER`
 - `TWILIO_MESSAGING_SERVICE_SID` (optional)
-- `PUBLIC_WEBHOOK_BASE_URL`
+- `PUBLIC_WEBHOOK_BASE_URL` — MUST exactly match what's set in the Twilio
+  console webhook URL. The X-Twilio-Signature is computed over it; any
+  mismatch (trailing slash, http vs https, wrong host) causes 403s.
+- `TWILIO_DRY_RUN` — defaults to `true`. Set to `false` to actually send.
+- `TWILIO_REQUIRE_SIGNATURE` — defaults to `false`. Set to `true` in
+  production (enforces signature verification even if creds drift).
 - `ANTHROPIC_API_KEY` (optional, only for AI seeding)
+
+## Twilio console setup
+Once you've bought a number and have credentials:
+1. In the Twilio console, go to your phone number's "Messaging" section.
+2. Under "A message comes in", select **Webhook**, method **HTTP POST**,
+   and paste `https://<your-host>/webhooks/twilio/inbound`.
+3. Under "Status callback URL" paste
+   `https://<your-host>/webhooks/twilio/status` (POST).
+4. Make sure `PUBLIC_WEBHOOK_BASE_URL` in your `.env` is the same origin
+   (scheme + host) as the URLs above. The signature won't validate otherwise.
+5. Flip `TWILIO_DRY_RUN=false` and `TWILIO_REQUIRE_SIGNATURE=true` for
+   real traffic.
 
 ## Deploy
 - [ ] Pick a host (Fly.io, Render, Railway). The app is a single Fastify process + Postgres.

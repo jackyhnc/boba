@@ -12,6 +12,21 @@ const EnvSchema = z.object({
   TWILIO_PHONE_NUMBER: z.string().optional().default(""),
   TWILIO_MESSAGING_SERVICE_SID: z.string().optional().default(""),
 
+  // When true (default in dev), outbound SMS is logged instead of sent.
+  // Set to "false" once real credentials are in place.
+  TWILIO_DRY_RUN: z
+    .string()
+    .default("true")
+    .transform((v) => v.toLowerCase() !== "false"),
+
+  // When true, inbound webhook signature verification is enforced even if
+  // creds look incomplete. Default false so dev/ngrok testing isn't blocked
+  // before the user provisions Twilio; flip to true in production.
+  TWILIO_REQUIRE_SIGNATURE: z
+    .string()
+    .default("false")
+    .transform((v) => v.toLowerCase() === "true"),
+
   PUBLIC_WEBHOOK_BASE_URL: z.string().url().default("http://localhost:3000"),
 
   AI_SEEDING_ENABLED: z

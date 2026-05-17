@@ -27,9 +27,4 @@ describe("health routes", () => {
     expect(body.name).toBe("boba");
   });
 
-  it("Twilio inbound webhook stub returns 501", async () => {
-    const app = await appPromise;
-    const res = await app.inject({ method: "POST", url: "/webhooks/twilio/inbound" });
-    expect(res.statusCode).toBe(501);
-  });
 });

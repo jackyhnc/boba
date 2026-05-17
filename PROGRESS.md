@@ -4,6 +4,170 @@ Reverse-chronological. Newest entries on top. Each entry: timestamp, what shippe
 
 ---
 
+## 2026-05-17 — Run 5: iMessage relay layer (Twilio)
+
+**Shipped**
+- `src/twilio/` module — full inbound/outbound SMS relay built around a
+  pure router, with Twilio's signature scheme implemented from scratch.
+  - `signature.ts` — `computeTwilioSignature(authToken, url, params)`
+    and `verifyTwilioSignature(...)`. Implements v1 (HMAC-SHA1 over
+    `url + concat(sorted(key+value))`, base64). Sorts param keys
+    lexicographically; accepts `string | string[]` values so duplicate
+    form keys (rare, but legal) are handled correctly.
+    `timingSafeEqual` for the compare. Pure / no IO.
+  - `client.ts` — `createTwilioClient({ env, logger, fetchImpl? })`.
+    Raw `fetch` against `api.twilio.com/2010-04-01` — no SDK
+    dependency. Basic auth from `TWILIO_ACCOUNT_SID:TWILIO_AUTH_TOKEN`.
+    Honours `TWILIO_DRY_RUN` (defaults to `true` in dev): logs +
+    returns a synthetic `DRYRUN-…` sid instead of hitting the API,
+    so every send path is exercisable without credentials.
+    `MessagingServiceSid` takes precedence over `TWILIO_PHONE_NUMBER`
+    when both are configured.
+  - `conversation.ts` — pure `route(input)` state machine that branches
+    on `UserStatus` and returns a `RouteResult` of `{outbounds[],
+    persistInbound?, milestonesToRecord[]}`. Cases:
+    - **unknown sender** → `unknown_sender_intro` SMS (no persist;
+      onboarding owns user creation).
+    - **BANNED** → silent drop (no outbound at all).
+    - **PAUSED** → "your account is paused" reply.
+    - **ONBOARDING** → holding reply via `routeOnboarding` seam (the
+      full onboarding SM ships in the next task).
+    - **ACTIVE + no match** → "your next match drops at 5pm" holding
+      pattern.
+    - **ACTIVE + match** → relay body to partner, score depth inline,
+      run `nextMilestoneToUnlock` against the priors+in-flight
+      conversation, and (if a milestone tipped) emit reveal SMSes
+      to BOTH sides. Reveals carry `{{age}}/{{profession}}/{{heightCm}}`
+      placeholders; the route layer substitutes them after loading
+      partner Stats.
+    - `renderRevealBody(milestone, stats)` exposed for the substitution
+      step.
+    - `COPY` constant centralises message copy.
+  - `prisma-deps.ts` — narrow `TwilioPrisma` surface
+    (`user | dailyMatch | message | milestoneProgress`).
+    `findUserByPhone`, `loadActiveMatchForUser` (returns the trimmed
+    `RouterActiveMatch` shape the router needs, including prior
+    messages + unlocked milestone set), `persistInboundMessage`,
+    `persistOutboundMessage`, `recordDeliveryStatus`. `loadActiveMatch`
+    defensively picks the most recent ACTIVE match if more than one
+    is found (shouldn't happen but the data invariant isn't enforced
+    in schema).
+  - `routes.ts` — `registerTwilioRoutes(app, { deps? })`. Accepts an
+    injected `{ prisma, twilio }` for tests. Handlers:
+    - `POST /webhooks/twilio/inbound`: parses form body via
+      `@fastify/formbody`, verifies signature, runs the router,
+      persists the inbound `Message` row (with the inbound `MessageSid`
+      as `twilioSid`), upserts any milestone unlocks, then sends each
+      outbound through the client and persists the matching outbound
+      `Message` row (filled in with the returned sid). Returns empty
+      TwiML `<Response></Response>` so Twilio doesn't auto-reply.
+      Signature verification: when `TWILIO_AUTH_TOKEN` is empty we
+      log a warning and allow (dev / stubbed creds), unless
+      `TWILIO_REQUIRE_SIGNATURE=true`. Once a token is configured
+      we *always* require a valid signature (closes the
+      "wait, I set the token but forgot the flag" gap). URL the
+      signature is verified against is reconstructed from
+      `PUBLIC_WEBHOOK_BASE_URL + req.url` so it matches what Twilio
+      hashed (Fastify's view of the URL behind a proxy can differ).
+    - `POST /webhooks/twilio/status`: same signature gate, looks up
+      message by `MessageSid`, returns 204. Adding a richer
+      `deliveryStatus` column to `Message` is queued for a follow-up
+      schema change — for now we just log.
+  - `index.ts` barrel exports.
+- `src/app.ts` registers `@fastify/formbody` (Twilio sends
+  `application/x-www-form-urlencoded`) and forwards an optional
+  `twilio.deps` to the route registrar so tests can inject mocks.
+- `src/config/env.ts` extended with `TWILIO_DRY_RUN` (default `true`)
+  and `TWILIO_REQUIRE_SIGNATURE` (default `false`). Both string-typed
+  in the env, coerced to bool. `.env.example` updated to match.
+- `USER_TODO.md` extended with Twilio console-setup steps and the new
+  env vars.
+- Deleted `src/routes/twilio.ts` stub — replaced by the real module.
+
+**Tests** (all green, 112/112, up from 79/79)
+- `tests/twilio/signature.test.ts` (11) — algorithm conformance vs.
+  a hand-built reference signature; sort stability; sensitivity to
+  body / URL / auth-token tampering; array-valued params;
+  `verifyTwilioSignature` accepts the canonical signature and rejects
+  every mutation (wrong body, wrong token, missing header, missing
+  auth token, garbage header).
+- `tests/twilio/conversation.test.ts` (15) — every router branch:
+  unknown sender returns the intro; BANNED drops silently;
+  PAUSED/ONBOARDING/no-match return their respective system replies;
+  ACTIVE relay carries body+ids+metadata; depthScore is computed
+  in-line and short messages score lower than long-question ones;
+  AGE unlock emits reveals to BOTH sides at the threshold boundary;
+  below-threshold doesn't emit a reveal; already-unlocked milestones
+  cause the ladder to pause without skipping. `renderRevealBody`
+  substitutes age/profession/height (and em-dash for null stats).
+- `tests/twilio/routes.test.ts` (8) — uses `app.inject` with a
+  hand-rolled fake `TwilioPrisma` and a vi.fn Twilio client. Covers
+  unknown phone, full ACTIVE relay (asserts ordered inbound+outbound
+  persist with correct `twilioSid`), ONBOARDING short-circuits,
+  400 on missing From/Body, 403 on missing signature when token is
+  set, 200 on properly-signed request (signature computed via the
+  same `computeTwilioSignature` the server uses), and 204/400 on
+  status callback paths.
+
+**Verified**
+- `npm run build` — clean.
+- `npm run typecheck` — clean.
+- `npm run lint` — clean.
+- `npm test` — 112/112 pass.
+- `npx prisma generate` — clean (schema untouched this run).
+
+**Didn't try / deferred**
+- No live Twilio call — `TWILIO_DRY_RUN` is on by default and creds
+  are stubbed. The dry-run path is unit-tested; real-network behaviour
+  comes online when the user finishes provisioning.
+- Did not add a `deliveryStatus` column to `Message`. The status
+  callback handler looks up by `twilioSid` and acks; persisting the
+  actual state (queued/sent/delivered/failed) needs a schema change
+  and probably a small enum. Leaving it for a follow-up so this run
+  stays focused.
+- `routeOnboarding` is a one-liner stub by design — the full SMS-driven
+  onboarding state machine is the next checklist item.
+- Outbound persistence currently attributes system replies (paused /
+  no-match / unknown-sender intro) by *not* persisting them — they
+  return `matchId: null` so the loop skips the insert. That's
+  intentional: those messages don't belong to any match. Worth
+  revisiting if/when we add a `SystemMessage` model for retention.
+
+**Blocked on user** — nothing new. `USER_TODO.md` still accurate;
+expanded the Twilio-console section so they have a clear checklist.
+
+**Next agent: pick this up**
+- Task: **Onboarding state machine** (next box in GOAL.md). Build
+  `src/onboarding/`:
+  - `state.ts`: pure `Step` enum + `StepHandler` interface. Steps:
+    `WELCOME` → `PHONE_VERIFY` (skip if Twilio supplies it) →
+    `NAME` → `CAMPUS_EMAIL` → `AGE` → `GENDER` →
+    `PREFERRED_GENDERS` → `MIN_AGE/MAX_AGE` →
+    `MIN_HEIGHT/MAX_HEIGHT` → `OWN_HEIGHT` → `PROFESSION` →
+    `TYPE_DESCRIPTOR` (free-text "what's your type?") →
+    `PHOTO_URL` (defer — accept "skip" for now) → `DONE`.
+  - `parser.ts`: per-step input parsing + validation (e.g. age is
+    18–80, height is cm in a sane range, gender maps to enum,
+    "skip" handled where allowed). Pure.
+  - `next.ts`: `(user, currentStep, input) → { reply, nextStep,
+    persistChanges }`. Pure, returns a writeable plan; the IO layer
+    applies it.
+  - `prisma-deps.ts`: adapters that load/save the onboarding state
+    onto User/Stats/Preferences. Suggest adding a small
+    `OnboardingState { userId, step, updatedAt }` model (a single
+    field on User would also work — pick one and document).
+  - Wire into `routeOnboarding` in `src/twilio/conversation.ts`:
+    replace the stub with a call into the onboarding step machine,
+    return its reply as the outbound. Persist changes inside the
+    inbound route handler.
+- Tests: `parser.test.ts`, `next.test.ts` (each step transition),
+  and an end-to-end test that drives a fake user from WELCOME to
+  DONE via `app.inject` posting form-bodies, asserting the user
+  ends up ACTIVE with Stats + Preferences populated.
+- Update `GOAL.md` + `PROGRESS.md` + (if anything new) `USER_TODO.md`.
+
+---
+
 ## 2026-05-17 — Run 4: milestone system
 
 **Shipped**
