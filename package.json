@@ -18,8 +18,12 @@
     "typecheck": "tsc --noEmit",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
+    "seed": "tsx prisma/seed.ts",
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose down"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@fastify/formbody": "^8.0.2",

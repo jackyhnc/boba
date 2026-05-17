@@ -23,10 +23,14 @@ npm run db:up
 # 3. Copy env and edit if you have credentials
 cp .env.example .env
 
-# 4. (Once schema lands) generate the Prisma client
+# 4. Generate the Prisma client + apply migrations
 npm run prisma:generate
+npm run prisma:migrate
 
-# 5. Run the dev server
+# 5. Seed a handful of fake users for local dev
+npm run seed
+
+# 6. Run the dev server
 npm run dev
 ```
 
@@ -43,6 +47,7 @@ The server listens on `PORT` (default `3000`). Hit `http://localhost:3000/health
 - `npm run db:up` / `npm run db:down` — Docker Postgres on/off
 - `npm run prisma:generate` — Regenerate the Prisma client
 - `npm run prisma:migrate` — Create/apply a dev migration
+- `npm run seed` — Insert fake users (idempotent; safe to re-run)
 
 ## Layout
 
@@ -54,13 +59,22 @@ src/
   lib/
     logger.ts       Pino instance
     prisma.ts       Shared Prisma client
+    pair.ts         Ordered-pair helper
   routes/
     health.ts       GET /health, GET /
-    twilio.ts       POST /webhooks/twilio/* (stubs for now)
+  matching/         Compatibility scoring + daily-match selector
+  milestones/       Depth scoring + reveal-unlock ladder
+  onboarding/       SMS-driven state machine for first-run setup
+  decisions/        End-of-day Keep/Maybe/Discard + resolution
+  rematch/          First-class rematch-eligibility predicate
+  safety/           Anti-doxx stat-fishing filter + harassment + report flow
+  ai/               AI-seeding persona client (stub + Anthropic)
+  twilio/           Inbound webhook, signature verification, conversation router
 prisma/
-  schema.prisma     Database schema (models land in next task)
-tests/
-  *.test.ts         Vitest specs
+  schema.prisma     Database schema
+  migrations/       Generated migrations
+  seed.ts           Local dev seed (run via `npm run seed`)
+tests/              Vitest specs mirroring src/
 docker-compose.yml  Local Postgres
 ```
 

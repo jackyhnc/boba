@@ -44,9 +44,9 @@ Boba is a dating app built around conversation before appearance. Anti-swipe, an
 - [x] Anti-doxxing: content filter for stat-fishing questions (name/school/instagram/photo asks) before reveals unlock
 - [x] Moderation hooks: profanity/harassment detection stubs, report flow
 - [x] AI-seeding plumbing: ability to mark a user as AI-backed, message routing through an LLM persona (disabled by default flag)
-- [ ] Tests: unit tests for matching, milestone unlocks, end-of-day resolution, rematch eligibility
-- [ ] Local dev script: docker-compose for Postgres, seed script with fake users
-- [ ] USER_TODO.md kept up-to-date with everything the user must do (Twilio signup, env vars, etc.)
+- [x] Tests: unit tests for matching, milestone unlocks, end-of-day resolution, rematch eligibility
+- [x] Local dev script: docker-compose for Postgres, seed script with fake users
+- [x] USER_TODO.md kept up-to-date with everything the user must do (Twilio signup, env vars, etc.)
 
 The checklist is living — add subtasks as they emerge.
 

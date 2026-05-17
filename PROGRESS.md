@@ -645,3 +645,17 @@ expanded the Twilio-console section so they have a clear checklist.
 
 **Next agent: pick this up**
 - Task: **Tests audit** + **seed script** (Postgres docker + fake-user generator) + write `BUILD_COMPLETE` once the checklist clears.
+
+---
+
+## 2026-05-17T12:53Z — Seed script + completion
+
+**Shipped**
+- `prisma/seed.ts`: 7 idempotent fake users (6 humans + 1 AI-backed `Robin`), each with Stats + Preferences. Upsert by phone.
+- `npm run seed` and Prisma `seed` config in `package.json`.
+- `tsconfig.json` now includes `prisma/*.ts` so the seed script is type-checked.
+- README refreshed: getting-started includes prisma:migrate + seed; layout matches reality.
+- All GOAL.md items checked off; `BUILD_COMPLETE` written.
+
+**Verified**
+- `npm run typecheck`, `npm test` (204/204), `npm run build`, `npm run lint` (0 warnings).

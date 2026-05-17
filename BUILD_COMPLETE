@@ -1,0 +1,24 @@
+DONE
+
+All items in GOAL.md checked off as of 2026-05-17T12:53Z.
+
+Snapshot:
+- 13/13 tasks complete
+- 19 test files, 204 tests passing
+- npm run build clean
+- npm run lint clean (0 warnings)
+- npm run typecheck clean
+
+Modules shipped:
+  src/matching      compatibility scoring + selector + persist
+  src/milestones    depth scoring + unlock ladder
+  src/onboarding    SMS-driven 11-step state machine
+  src/decisions     KEEP/MAYBE/DISCARD + resolution
+  src/rematch       eligibility predicate + loaders
+  src/safety        stat-fishing filter + harassment + report flow
+  src/ai            persona interface + Anthropic adapter + stub
+  src/twilio        signature, conversation router, webhook routes
+  prisma/seed.ts    7 idempotent fake users (1 AI-backed)
+
+Outstanding human-side work tracked in USER_TODO.md (Twilio signup,
+ANTHROPIC_API_KEY, deploy, domain, prod Postgres).
