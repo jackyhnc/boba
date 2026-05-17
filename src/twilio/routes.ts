@@ -112,6 +112,7 @@ export async function registerTwilioRoutes(
         body: result.persistInbound.body,
         depthScore: result.persistInbound.depthScore,
         twilioSid: messageSid,
+        flaggedStatFishing: result.persistInbound.flaggedStatFishing,
       });
       inboundRowId = inbound.id;
     }

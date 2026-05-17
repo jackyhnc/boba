@@ -18,6 +18,11 @@ import {
   parseDecisionKeyword,
   replyForOwnDecision,
 } from "../decisions/flow.js";
+import {
+  detectStatFishing,
+  shouldGateBy,
+  type StatFishDetection,
+} from "../safety/statFishing.js";
 import { scoreMessageDepth, type DepthInput } from "../milestones/depth.js";
 import {
   nextMilestoneToUnlock,
@@ -111,6 +116,7 @@ export interface PersistInbound {
   direction: MessageDirection; // always INBOUND when present
   body: string;
   depthScore: number;
+  flaggedStatFishing: boolean;
 }
 
 export interface RouteResult {
@@ -286,12 +292,23 @@ function routeActive(
     };
   }
 
-  // Score depth using prior messages from this same match.
+  // Stat-fishing detection. We only *gate* (zero depth, prepend warning)
+  // on categories whose milestone hasn't unlocked yet.
+  const statFish = detectStatFishing(body);
+  const gatedCategories = statFish.categories.filter((c) =>
+    shouldGateBy(c, active.unlockedMilestones),
+  );
+  const hardFlag = gatedCategories.length > 0;
+
+  // Score depth using prior messages from this same match. We zero out
+  // the depth contribution from a hard-flagged message so the sender
+  // can't use stat-fishing to accelerate milestone unlocks.
   const depthInput: DepthInput = {
     message: { senderId: user.id, body },
     previousMessages: active.priorMessages,
   };
-  const depthScore = scoreMessageDepth(depthInput);
+  const rawDepth = scoreMessageDepth(depthInput);
+  const depthScore = hardFlag ? 0 : rawDepth;
 
   // Evaluate milestone unlocks AFTER this inbound is conceptually
   // persisted: we feed the unlock rule the full message list including
@@ -307,13 +324,21 @@ function routeActive(
     unlocked: active.unlockedMilestones,
   });
 
+  // On a hard flag we still relay the message (we don't censor speech),
+  // but we prepend a system warning to the partner so they know the
+  // gate triggered. This gives them context without revealing detector
+  // mechanics.
+  const relayedBody = hardFlag
+    ? `${prependedWarning(gatedCategories)}\n${body}`
+    : body;
+
   const outbounds: OutboundAction[] = [
     // Relay to partner.
     {
       toPhone: active.partner.phone,
       toUserId: active.partner.id,
       fromUserId: user.id,
-      body,
+      body: relayedBody,
       isRelay: true,
       matchId: active.id,
       kind: "relay",
@@ -358,12 +383,22 @@ function routeActive(
       direction: "INBOUND",
       body,
       depthScore,
+      flaggedStatFishing: hardFlag,
     },
     milestonesToRecord,
     onboardingAdvance: null,
     decisionToRecord: null,
   };
 }
+
+function prependedWarning(categories: string[]): string {
+  // Keep the warning short — long banners on every SMS get noisy.
+  const tag = categories.length === 1 ? categories[0] : "personal info";
+  return `⚠ Heads up: this asks about ${tag} before the reveal — that's against Boba's flow.`;
+}
+
+// Re-export for tests + telemetry.
+export type { StatFishDetection };
 
 function systemReply(
   user: RouterUser,

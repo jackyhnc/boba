@@ -107,6 +107,8 @@ export async function persistInboundMessage(
     body: string;
     depthScore: number;
     twilioSid: string | null;
+    flaggedStatFishing?: boolean;
+    flaggedHarassment?: boolean;
   },
 ): Promise<{ id: string }> {
   const row = await prisma.message.create({
@@ -117,6 +119,8 @@ export async function persistInboundMessage(
       body: input.body,
       depthScore: input.depthScore,
       twilioSid: input.twilioSid,
+      flaggedStatFishing: input.flaggedStatFishing ?? false,
+      flaggedHarassment: input.flaggedHarassment ?? false,
     },
     select: { id: true },
   });

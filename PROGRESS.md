@@ -559,3 +559,27 @@ expanded the Twilio-console section so they have a clear checklist.
 
 **Next agent: pick this up**
 - Task: **Anti-doxxing filter** — content filter that flags inbound messages asking for identifying info (name, school, instagram, photo) before reveals unlock. Set `Message.flaggedStatFishing = true` and (optionally) replace the relayed body with a softened version or block reveal progress for that message.
+
+---
+
+## 2026-05-17T12:21Z — Anti-doxxing (stat-fishing) filter
+
+**Shipped**
+- `src/safety/statFishing.ts` — pure regex-driven detector.
+  - 6 categories: name, school, social, photo, phone, location.
+  - 18 probes (PROBES array) covering explicit "what's your X?", handle mentions, digit blobs, etc.
+  - `confidence`: 0.4 per distinct category, capped at 1.
+  - `shouldGateBy(category, unlockedMilestones)`: photo asks stop gating after FACE; the rest stay gated.
+- Wired into `routeActive`:
+  - On a hard flag (any *gated* category hit), `Message.flaggedStatFishing = true`, `depthScore = 0` (so stat-fishing can't accelerate reveals), and the relayed body gets a one-line warning prepended (e.g. `⚠ Heads up: this asks about name before the reveal — that's against Boba's flow.`) before being delivered to the partner. Speech isn't censored; the partner still sees what was sent.
+- `PersistInbound` extended with `flaggedStatFishing`; `persistInboundMessage` writes it to the row.
+
+**Tests**
+- `tests/safety/statFishing.test.ts` (14 cases): every category, benign cases, confidence ladder, gating override on FACE-unlocked.
+- `tests/twilio/conversation.test.ts`: 3 new cases — hard flag zeroes depth + warns partner; FACE-unlocked photo ask passes through; benign chat untouched.
+
+**Verified**
+- `npm run typecheck`, `npm test` clean. 176/176 pass.
+
+**Next agent: pick this up**
+- Task: **Moderation hooks** — profanity/harassment regex + `Report` row flow (e.g. REPORT keyword from an SMS opens a report, increments `User.reportCount`).

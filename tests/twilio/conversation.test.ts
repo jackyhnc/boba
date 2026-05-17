@@ -45,6 +45,43 @@ function makeInput(overrides: Partial<RouteInput> = {}): RouteInput {
   };
 }
 
+describe("route — stat-fishing gate", () => {
+  it("hard-flags an inbound asking for last name; zeroes depth; prepends warning to partner", () => {
+    const out = route(
+      makeInput({
+        body: "what's your last name?",
+        sender: makeUser(),
+      }),
+    );
+    expect(out.persistInbound?.flaggedStatFishing).toBe(true);
+    expect(out.persistInbound?.depthScore).toBe(0);
+    const relay = out.outbounds.find((o) => o.kind === "relay")!;
+    expect(relay.body).toMatch(/Heads up/);
+    expect(relay.body).toMatch(/what's your last name\?/);
+  });
+
+  it("does NOT gate a photo ask once FACE is unlocked", () => {
+    const out = route(
+      makeInput({
+        body: "send a pic?",
+        sender: makeUser(),
+        activeMatch: makeMatch({ unlockedMilestones: new Set(["FACE"]) }),
+      }),
+    );
+    expect(out.persistInbound?.flaggedStatFishing).toBe(false);
+    const relay = out.outbounds.find((o) => o.kind === "relay")!;
+    expect(relay.body).toBe("send a pic?");
+  });
+
+  it("leaves benign chat untouched", () => {
+    const out = route(makeInput({ body: "how was your day?" }));
+    expect(out.persistInbound?.flaggedStatFishing).toBe(false);
+    expect(out.outbounds.find((o) => o.kind === "relay")?.body).toBe(
+      "how was your day?",
+    );
+  });
+});
+
 describe("route — unknown sender", () => {
   it("replies with the intro, no persist, no milestones", () => {
     const out = route({
