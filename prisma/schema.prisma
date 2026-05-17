@@ -97,6 +97,7 @@ model User {
   decisions       EndOfDayDecision[]
   reportsFiled    Report[]           @relation("ReportReporter")
   reportsReceived Report[]           @relation("ReportSubject")
+  redeemedInvite  InviteCode?
 
   @@index([status])
 }
@@ -241,6 +242,23 @@ model RematchHistory {
 
   @@unique([userAId, userBId])
   @@index([lastMatchedAt])
+}
+
+// ─── Invite codes ───────────────────────────────────────────────────────────
+
+// One-time codes handed out during the closed-beta phase. A user must
+// redeem one during onboarding (unless INVITES_REQUIRED=false in env).
+// The redeemer is recorded so we can audit / cap referrals later.
+model InviteCode {
+  id           String    @id @default(cuid())
+  code         String    @unique
+  label        String? // free-text — "twitter launch", "founder friends", etc.
+  createdAt    DateTime  @default(now())
+  redeemedAt   DateTime?
+  redeemedById String?   @unique
+  redeemedBy   User?     @relation(fields: [redeemedById], references: [id], onDelete: SetNull)
+
+  @@index([redeemedAt])
 }
 
 // ─── Moderation: reports ────────────────────────────────────────────────────

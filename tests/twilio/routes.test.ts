@@ -30,15 +30,24 @@ interface FakeMatch {
   milestones: Array<{ milestone: "AGE" | "PROFESSION" | "HEIGHT" | "FACE" }>;
 }
 
+interface FakeInvite {
+  id: string;
+  code: string;
+  redeemedById: string | null;
+  redeemedAt: Date | null;
+}
+
 function makeFakeDb(): {
   db: TwilioPrisma;
   users: FakeUser[];
   matches: FakeMatch[];
+  invites: FakeInvite[];
   insertedMessages: Array<{ matchId: string; senderId: string; direction: string; body: string; depthScore?: number; twilioSid: string | null }>;
   upsertedMilestones: Array<{ matchId: string; milestone: string }>;
 } {
   const users: FakeUser[] = [];
   const matches: FakeMatch[] = [];
+  const invites: FakeInvite[] = [];
   const insertedMessages: Array<{ matchId: string; senderId: string; direction: string; body: string; depthScore?: number; twilioSid: string | null }> = [];
   const upsertedMilestones: Array<{ matchId: string; milestone: string }> = [];
 
@@ -72,6 +81,24 @@ function makeFakeDb(): {
           }
         }
         return { ...u, reportCount: (rec.reportCount as number) ?? 0, status: u.status };
+      },
+      create: async ({ data }: { data: { phone: string; status: FakeUser["status"] } }) => {
+        const id = `u_auto_${users.length + 1}`;
+        const u: FakeUser = {
+          id,
+          phone: data.phone,
+          displayName: null,
+          status: data.status,
+          onboardingStep: null,
+        };
+        users.push(u);
+        return {
+          id,
+          phone: u.phone,
+          displayName: null,
+          status: u.status,
+          onboardingStep: null,
+        };
       },
     },
     stats: {
@@ -204,10 +231,28 @@ function makeFakeDb(): {
         return { id: `r_${(data as { reporterId: string }).reporterId}_${Date.now()}` };
       },
     },
+    inviteCode: {
+      findUnique: async ({ where }: { where: { code: string } }) => {
+        const row = invites.find((i) => i.code === where.code);
+        if (!row) return null;
+        return { id: row.id, redeemedById: row.redeemedById };
+      },
+      findFirst: async ({ where }: { where: { redeemedById: string } }) => {
+        const row = invites.find((i) => i.redeemedById === where.redeemedById);
+        return row ? { id: row.id, code: row.code } : null;
+      },
+      update: async ({ where, data }: { where: { id: string }; data: { redeemedById: string; redeemedAt: Date } }) => {
+        const row = invites.find((i) => i.id === where.id);
+        if (!row) throw new Error(`no invite ${where.id}`);
+        row.redeemedById = data.redeemedById;
+        row.redeemedAt = data.redeemedAt;
+        return row;
+      },
+    },
     $transaction: async <T,>(fn: (tx: unknown) => Promise<T>) => fn(db),
   } as unknown as TwilioPrisma;
 
-  return { db, users, matches, insertedMessages, upsertedMilestones };
+  return { db, users, matches, invites, insertedMessages, upsertedMilestones };
 }
 
 function makeFakeTwilio(): { client: TwilioClient; calls: Array<{ to: string; body: string }> } {
@@ -241,8 +286,8 @@ afterEach(() => {
 });
 
 describe("POST /webhooks/twilio/inbound", () => {
-  it("replies with empty TwiML and intro for an unknown phone", async () => {
-    const { db } = makeFakeDb();
+  it("auto-provisions an unknown phone into ONBOARDING and welcomes them", async () => {
+    const { db, users } = makeFakeDb();
     const { client, calls } = makeFakeTwilio();
     const app = await buildApp({ twilio: { deps: { prisma: db, twilio: client } } });
 
@@ -263,6 +308,11 @@ describe("POST /webhooks/twilio/inbound", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]!.to).toBe("+15550009999");
     expect(calls[0]!.body).toMatch(/Boba/i);
+    // The user was auto-created and is now ONBOARDING at ask_invite_code.
+    expect(users).toHaveLength(1);
+    expect(users[0]!.phone).toBe("+15550009999");
+    expect(users[0]!.status).toBe("ONBOARDING");
+    expect(users[0]!.onboardingStep).toBe("ask_invite_code");
     await app.close();
   });
 
@@ -314,6 +364,73 @@ describe("POST /webhooks/twilio/inbound", () => {
       direction: "OUTBOUND",
     });
     expect(upsertedMilestones).toEqual([]);
+    await app.close();
+  });
+
+  it("redeems an invite code during onboarding and advances to ask_display_name", async () => {
+    const { db, users, invites } = makeFakeDb();
+    users.push({
+      id: "u_onb",
+      phone: "+15550005001",
+      displayName: null,
+      status: "ONBOARDING",
+      onboardingStep: "ask_invite_code",
+    });
+    invites.push({
+      id: "inv_1",
+      code: "ABCD1234",
+      redeemedById: null,
+      redeemedAt: null,
+    });
+    const { client, calls } = makeFakeTwilio();
+    const app = await buildApp({ twilio: { deps: { prisma: db, twilio: client } } });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/webhooks/twilio/inbound",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams({
+        From: "+15550005001",
+        Body: "abcd-1234",
+        MessageSid: "SM" + "i".repeat(32),
+      }).toString(),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.body).toMatch(/what should we call you/i);
+    const u = users.find((x) => x.id === "u_onb")!;
+    expect(u.onboardingStep).toBe("ask_display_name");
+    expect(invites[0]!.redeemedById).toBe("u_onb");
+    await app.close();
+  });
+
+  it("rejects a bad invite code and keeps cursor on ask_invite_code", async () => {
+    const { db, users } = makeFakeDb();
+    users.push({
+      id: "u_onb",
+      phone: "+15550005002",
+      displayName: null,
+      status: "ONBOARDING",
+      onboardingStep: "ask_invite_code",
+    });
+    const { client, calls } = makeFakeTwilio();
+    const app = await buildApp({ twilio: { deps: { prisma: db, twilio: client } } });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/webhooks/twilio/inbound",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams({
+        From: "+15550005002",
+        Body: "ZZZZ9999", // well-formed alphabet, but no row matches.
+        MessageSid: "SM" + "x".repeat(32),
+      }).toString(),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(calls[0]!.body).toMatch(/don't recognize that code/);
+    expect(users.find((x) => x.id === "u_onb")!.onboardingStep).toBe(
+      "ask_invite_code",
+    );
     await app.close();
   });
 
@@ -418,10 +535,10 @@ describe("POST /webhooks/twilio/inbound", () => {
     expect(res.statusCode).toBe(200);
     expect(calls).toHaveLength(1);
     expect(calls[0]!.to).toBe("+15550001001");
-    expect(calls[0]!.body).toMatch(/Welcome to Boba/);
-    // After the welcome the user's cursor is at ask_display_name.
+    expect(calls[0]!.body).toMatch(/invite code/);
+    // After the welcome the user's cursor is at ask_invite_code (invites required).
     const onb = users.find((u) => u.id === "u_onb")!;
-    expect(onb.onboardingStep).toBe("ask_display_name");
+    expect(onb.onboardingStep).toBe("ask_invite_code");
     expect(insertedMessages).toEqual([]);
     await app.close();
   });

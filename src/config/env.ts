@@ -34,6 +34,29 @@ const EnvSchema = z.object({
     .default("false")
     .transform((v) => v.toLowerCase() === "true"),
   ANTHROPIC_API_KEY: z.string().optional().default(""),
+
+  // Closed-beta invite code gate. When true (default), the onboarding
+  // state machine begins by asking for a redeemable InviteCode.
+  INVITES_REQUIRED: z
+    .string()
+    .default("true")
+    .transform((v) => v.toLowerCase() !== "false"),
+
+  // Bearer token (X-Admin-Token header) required by /admin/* routes. When
+  // empty, admin routes return 503 (disabled).
+  ADMIN_TOKEN: z.string().optional().default(""),
+
+  // Auto-run the daily-match scheduler in-process. When false, only the
+  // /admin/run-daily-match endpoint triggers a run. Cron is in UTC.
+  SCHEDULER_ENABLED: z
+    .string()
+    .default("false")
+    .transform((v) => v.toLowerCase() === "true"),
+  SCHEDULER_CRON: z.string().default("0 21 * * *"), // 9pm UTC = 5pm ET
+
+  // Sentry error reporting. No-op when DSN empty.
+  SENTRY_DSN: z.string().optional().default(""),
+  SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

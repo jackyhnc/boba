@@ -5,9 +5,13 @@
 // reply). No Prisma here; the caller persists.
 
 import type { Gender } from "@prisma/client";
+import { isWellFormed, normalizeCode } from "../invites/code.js";
 import {
+  DEFAULT_FLOW_CONFIG,
   STEP_ORDER,
   type AdvanceResult,
+  type FlowConfig,
+  type InboundMedia,
   type OnboardingUpdates,
   type ParseResult,
   type StepId,
@@ -16,13 +20,20 @@ import {
 // ─── Copy ───────────────────────────────────────────────────────────────────
 
 export const COPY = {
+  welcomeWithInvite:
+    "Welcome to Boba 🧋 — conversation-first dating. We're in closed beta. Reply with your invite code to get started (e.g. ABCD-1234).",
   welcome:
     "Welcome to Boba 🧋 — conversation-first dating. We'll get you set up with a few quick questions. What should we call you? (first name is fine)",
+  askDisplayName: "Got it. What should we call you? (first name is fine)",
   askAge: "Got it. How old are you?",
   askGender:
     "What's your gender? Reply WOMAN, MAN, NONBINARY, or OTHER.",
   askProfession: "What do you do? (job title or 'student' is fine)",
   askHeightCm: "How tall are you in cm? (e.g. 175)",
+  askPhoto:
+    "Send us a selfie 📸 as an MMS attachment. This is held back from your matches until the very end of the day — they won't see it during your conversation. Reply SKIP if you can't right now.",
+  askPhotoNeedsImage:
+    "We need a photo — send a picture as an MMS, or reply SKIP if you can't.",
   askPreferredGenders:
     "Who are you open to matching with? Reply with one or more separated by commas: WOMAN, MAN, NONBINARY, OTHER.",
   askMinAge: "Minimum age you'd like to match with?",
@@ -36,6 +47,29 @@ export const COPY = {
 } as const;
 
 // ─── Parsers ────────────────────────────────────────────────────────────────
+
+function parseInviteCode(body: string): ParseResult {
+  const code = normalizeCode(body);
+  if (!isWellFormed(code)) {
+    return {
+      ok: false,
+      reason:
+        "That doesn't look like a Boba invite code. Try again — they look like ABCD-1234.",
+    };
+  }
+  return { ok: true, updates: { inviteCodeToRedeem: code } };
+}
+
+function parsePhoto(body: string, media: InboundMedia | null): ParseResult {
+  const trimmed = body.trim().toUpperCase();
+  if (trimmed === "SKIP") {
+    return { ok: true, updates: {} };
+  }
+  if (!media || !media.contentType?.toLowerCase().startsWith("image/")) {
+    return { ok: false, reason: COPY.askPhotoNeedsImage };
+  }
+  return { ok: true, updates: { stats: { photoUrl: media.url } } };
+}
 
 function parseDisplayName(body: string): ParseResult {
   const name = body.trim();
@@ -167,7 +201,7 @@ function parseCampusEmailDomain(body: string): ParseResult {
 // ─── Step → (parser, next-step prompt) wiring ───────────────────────────────
 
 interface StepConfig {
-  parse: (body: string) => ParseResult;
+  parse: (body: string, media: InboundMedia | null) => ParseResult;
   /** The prompt to send AFTER successfully completing this step. */
   nextPrompt: string;
 }
@@ -177,11 +211,13 @@ const STEP_PARSERS: Record<
   Exclude<StepId, "welcome" | "done">,
   StepConfig
 > = {
+  ask_invite_code: { parse: parseInviteCode, nextPrompt: COPY.askDisplayName },
   ask_display_name: { parse: parseDisplayName, nextPrompt: COPY.askAge },
   ask_age: { parse: parseAge, nextPrompt: COPY.askGender },
   ask_gender: { parse: parseGender, nextPrompt: COPY.askProfession },
   ask_profession: { parse: parseProfession, nextPrompt: COPY.askHeightCm },
-  ask_height_cm: { parse: parseHeightCm, nextPrompt: COPY.askPreferredGenders },
+  ask_height_cm: { parse: parseHeightCm, nextPrompt: COPY.askPhoto },
+  ask_photo: { parse: parsePhoto, nextPrompt: COPY.askPreferredGenders },
   ask_preferred_genders: {
     parse: parsePreferredGenders,
     nextPrompt: COPY.askMinAge,
@@ -222,9 +258,21 @@ function nextStepAfter(current: StepId): StepId {
 export function advance(
   currentStep: StepId | null,
   body: string,
+  options: { media?: InboundMedia | null; config?: Partial<FlowConfig> } = {},
 ): AdvanceResult {
+  const cfg = { ...DEFAULT_FLOW_CONFIG, ...(options.config ?? {}) };
+  const media = options.media ?? null;
+
   if (currentStep === null || currentStep === "welcome") {
     // First inbound — send welcome + ask first question.
+    if (cfg.invitesRequired) {
+      return {
+        nextStep: "ask_invite_code",
+        updates: {},
+        reply: COPY.welcomeWithInvite,
+        markActive: false,
+      };
+    }
     return {
       nextStep: "ask_display_name",
       updates: {},
@@ -242,8 +290,20 @@ export function advance(
     };
   }
 
-  const cfg = STEP_PARSERS[currentStep];
-  const parsed = cfg.parse(body);
+  // When invites are disabled, treat `ask_invite_code` as a transparent
+  // pass-through (a returning ONBOARDING user mid-flow doesn't get
+  // stuck if the env flipped).
+  if (currentStep === "ask_invite_code" && !cfg.invitesRequired) {
+    return {
+      nextStep: "ask_display_name",
+      updates: {},
+      reply: COPY.askDisplayName,
+      markActive: false,
+    };
+  }
+
+  const stepCfg = STEP_PARSERS[currentStep];
+  const parsed = stepCfg.parse(body, media);
   if (!parsed.ok) {
     return {
       nextStep: currentStep,
@@ -257,7 +317,7 @@ export function advance(
   return {
     nextStep: next,
     updates: parsed.updates,
-    reply: cfg.nextPrompt,
+    reply: stepCfg.nextPrompt,
     markActive: next === "done",
   };
 }

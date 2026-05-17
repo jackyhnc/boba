@@ -38,6 +38,8 @@ import type { MessageForDepth } from "../milestones/types.js";
 import { advance as advanceOnboarding } from "../onboarding/flow.js";
 import type {
   AdvanceResult as OnboardingAdvance,
+  FlowConfig as OnboardingFlowConfig,
+  InboundMedia,
   StepId as OnboardingStepId,
 } from "../onboarding/types.js";
 
@@ -86,6 +88,10 @@ export interface RouteInput {
   body: string;
   /** Active match for `sender`, if any. */
   activeMatch: RouterActiveMatch | null;
+  /** First media attachment Twilio shipped with the message (MMS), if any. */
+  media?: InboundMedia | null;
+  /** Onboarding-flow toggles (e.g. invitesRequired). */
+  onboardingConfig?: Partial<OnboardingFlowConfig>;
 }
 
 // ─── Outputs ────────────────────────────────────────────────────────────────
@@ -277,7 +283,7 @@ export function route(input: RouteInput): RouteResult {
       };
 
     case "ONBOARDING":
-      return routeOnboarding(user, trimmed);
+      return routeOnboarding(user, trimmed, input.media ?? null, input.onboardingConfig);
 
     case "ACTIVE":
       return routeActive(user, trimmed, input.activeMatch);
@@ -289,8 +295,13 @@ export function route(input: RouteInput): RouteResult {
  * + transition logic to `../onboarding/flow.ts` and emit a single system
  * reply with the next prompt (or a clarifying retry on parse failure).
  */
-function routeOnboarding(user: RouterUser, body: string): RouteResult {
-  const adv = advanceOnboarding(user.onboardingStep, body);
+function routeOnboarding(
+  user: RouterUser,
+  body: string,
+  media: InboundMedia | null,
+  config: Partial<OnboardingFlowConfig> | undefined,
+): RouteResult {
+  const adv = advanceOnboarding(user.onboardingStep, body, { media, ...(config ? { config } : {}) });
   return {
     outbounds: [systemReply(user, adv.reply, "onboarding_stub")],
     persistInbound: null,

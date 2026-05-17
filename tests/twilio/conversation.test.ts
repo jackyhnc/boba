@@ -189,7 +189,7 @@ describe("route — by user status", () => {
     expect(out.persistInbound).toBeNull();
   });
 
-  it("ONBOARDING (no step yet) sends the welcome and advances to ask_display_name", () => {
+  it("ONBOARDING (no step yet, invites required) sends invite welcome and advances to ask_invite_code", () => {
     const out = route(
       makeInput({
         sender: makeUser({ status: "ONBOARDING", onboardingStep: null }),
@@ -198,12 +198,24 @@ describe("route — by user status", () => {
     );
     expect(out.outbounds).toHaveLength(1);
     expect(out.outbounds[0]).toMatchObject({ kind: "onboarding_stub" });
-    expect(out.outbounds[0]!.body).toMatch(/Welcome to Boba/);
+    expect(out.outbounds[0]!.body).toMatch(/invite code/);
     expect(out.persistInbound).toBeNull();
     expect(out.onboardingAdvance).toMatchObject({
       userId: "u_alice",
-      advance: { nextStep: "ask_display_name", markActive: false },
+      advance: { nextStep: "ask_invite_code", markActive: false },
     });
+  });
+
+  it("ONBOARDING with invites disabled goes straight to ask_display_name", () => {
+    const out = route(
+      makeInput({
+        sender: makeUser({ status: "ONBOARDING", onboardingStep: null }),
+        activeMatch: null,
+        onboardingConfig: { invitesRequired: false },
+      }),
+    );
+    expect(out.onboardingAdvance?.advance.nextStep).toBe("ask_display_name");
+    expect(out.outbounds[0]!.body).toMatch(/Welcome to Boba/);
   });
 
   it("ONBOARDING parse failure stays on the same step", () => {

@@ -25,6 +25,7 @@ import {
   recordDecisionAndMaybeResolve,
   resolutionAnnouncement,
 } from "../decisions/index.js";
+import { redeemCode, type InvitePrisma } from "../invites/index.js";
 import { persistOnboardingUpdates } from "../onboarding/prisma-deps.js";
 import {
   incrementReportCount,
@@ -50,6 +51,9 @@ interface TwilioInboundParams {
   Body?: string;
   MessageSid?: string;
   AccountSid?: string;
+  NumMedia?: string;
+  MediaUrl0?: string;
+  MediaContentType0?: string;
   // ... many more fields are sent; we accept and ignore them.
 }
 
@@ -92,14 +96,43 @@ export async function registerTwilioRoutes(
     const from = (params.From ?? "").trim();
     const body = (params.Body ?? "").toString();
     const messageSid = params.MessageSid ?? null;
+    const numMedia = parseInt(params.NumMedia ?? "0", 10) || 0;
+    const media =
+      numMedia > 0 && params.MediaUrl0
+        ? {
+            url: params.MediaUrl0,
+            contentType: params.MediaContentType0 ?? null,
+          }
+        : null;
 
-    if (!from || !body) {
-      // Twilio shouldn't send these missing, but be explicit if it does.
-      app.log.warn({ params }, "twilio.inbound: missing From or Body");
+    if (!from || (!body && !media)) {
+      // Twilio shouldn't send both missing, but be explicit if it does.
+      app.log.warn({ params }, "twilio.inbound: missing From / Body+Media");
       return reply.code(400).header("content-type", "text/plain").send("missing From/Body");
     }
 
-    const sender = await findUserByPhone(db, from);
+    // Auto-provision a fresh ONBOARDING user the first time we hear from
+    // an unknown phone — they enter the invite-code step on the next reply.
+    let sender = await findUserByPhone(db, from);
+    if (!sender) {
+      const created = await db.user.create({
+        data: { phone: from, status: "ONBOARDING" },
+        select: {
+          id: true,
+          phone: true,
+          displayName: true,
+          status: true,
+          onboardingStep: true,
+        },
+      });
+      sender = {
+        id: created.id,
+        phone: created.phone,
+        displayName: created.displayName,
+        status: created.status,
+        onboardingStep: null,
+      };
+    }
     const activeMatch = sender ? await loadActiveMatchForUser(db, sender.id) : null;
 
     const result = route({
@@ -107,6 +140,8 @@ export async function registerTwilioRoutes(
       fromPhone: from,
       body,
       activeMatch,
+      media,
+      onboardingConfig: { invitesRequired: env.INVITES_REQUIRED },
     });
 
     // Persist the inbound message first so we have the row id before we
@@ -157,15 +192,45 @@ export async function registerTwilioRoutes(
 
     // Apply onboarding advance (if any) BEFORE we send the reply, so the
     // cursor stored on the user reflects what we're about to ask.
+    //
+    // Invite-code redemption is handled here: if the advance carries an
+    // `inviteCodeToRedeem`, we attempt to redeem it; on failure we
+    // rewrite the outbounds to a clarifying retry and DON'T persist the
+    // step (the user stays on `ask_invite_code`).
     if (result.onboardingAdvance) {
       const { userId, advance } = result.onboardingAdvance;
-      await persistOnboardingUpdates(
-        db,
-        userId,
-        advance.updates,
-        advance.nextStep,
-        advance.markActive,
-      );
+      if (advance.updates.inviteCodeToRedeem) {
+        const redemption = await redeemCode(db as unknown as InvitePrisma, {
+          userId,
+          rawCode: advance.updates.inviteCodeToRedeem,
+        });
+        if (!redemption.ok) {
+          const reasonReply = inviteFailureReply(redemption.reason);
+          result.outbounds = result.outbounds.map((o) =>
+            o.kind === "onboarding_stub" ? { ...o, body: reasonReply } : o,
+          );
+          // Skip persistence — the cursor stays where it was.
+        } else {
+          // Strip the directive from updates before persisting.
+          const updatesCopy = { ...advance.updates };
+          delete updatesCopy.inviteCodeToRedeem;
+          await persistOnboardingUpdates(
+            db,
+            userId,
+            updatesCopy,
+            advance.nextStep,
+            advance.markActive,
+          );
+        }
+      } else {
+        await persistOnboardingUpdates(
+          db,
+          userId,
+          advance.updates,
+          advance.nextStep,
+          advance.markActive,
+        );
+      }
     }
 
     // End-of-day decision (if any). We persist + maybe resolve, then
@@ -331,6 +396,19 @@ export async function registerTwilioRoutes(
     }
     return reply.code(204).send();
   });
+}
+
+function inviteFailureReply(
+  reason: "unknown_code" | "already_redeemed" | "self_already_redeemed",
+): string {
+  switch (reason) {
+    case "unknown_code":
+      return "We don't recognize that code. Double-check spelling — they look like ABCD-1234.";
+    case "already_redeemed":
+      return "That code has already been used by someone else. Got another?";
+    case "self_already_redeemed":
+      return "Looks like you've already redeemed an invite. We'll keep onboarding moving — what should we call you?";
+  }
 }
 
 /**

@@ -3,17 +3,31 @@ import { advance, COPY, mergeUpdates } from "../../src/onboarding/flow.js";
 import { STEP_ORDER } from "../../src/onboarding/types.js";
 
 describe("onboarding/advance — entry & terminal", () => {
-  it("null cursor → welcome + ask_display_name", () => {
+  it("null cursor with invites required → invite-welcome + ask_invite_code", () => {
     const r = advance(null, "hello?");
-    expect(r.nextStep).toBe("ask_display_name");
-    expect(r.reply).toBe(COPY.welcome);
+    expect(r.nextStep).toBe("ask_invite_code");
+    expect(r.reply).toBe(COPY.welcomeWithInvite);
     expect(r.markActive).toBe(false);
   });
 
-  it("welcome cursor behaves the same as null", () => {
-    const r = advance("welcome", "anything");
+  it("null cursor with invites disabled → classic welcome + ask_display_name", () => {
+    const r = advance(null, "hello?", { config: { invitesRequired: false } });
     expect(r.nextStep).toBe("ask_display_name");
     expect(r.reply).toBe(COPY.welcome);
+  });
+
+  it("welcome cursor behaves the same as null (invites required)", () => {
+    const r = advance("welcome", "anything");
+    expect(r.nextStep).toBe("ask_invite_code");
+    expect(r.reply).toBe(COPY.welcomeWithInvite);
+  });
+
+  it("ask_invite_code with invites disabled passes through", () => {
+    const r = advance("ask_invite_code", "irrelevant", {
+      config: { invitesRequired: false },
+    });
+    expect(r.nextStep).toBe("ask_display_name");
+    expect(r.updates).toEqual({});
   });
 
   it("done cursor returns the done copy without flipping state again", () => {
@@ -22,6 +36,45 @@ describe("onboarding/advance — entry & terminal", () => {
     expect(r.reply).toBe(COPY.done);
     expect(r.markActive).toBe(true);
     expect(r.updates).toEqual({});
+  });
+});
+
+describe("onboarding/advance — invite step", () => {
+  it("accepts a well-formed code and emits inviteCodeToRedeem directive", () => {
+    const r = advance("ask_invite_code", "abcd-1234");
+    expect(r.nextStep).toBe("ask_display_name");
+    expect(r.updates.inviteCodeToRedeem).toBe("ABCD1234");
+  });
+  it("rejects malformed", () => {
+    expect(advance("ask_invite_code", "short").nextStep).toBe("ask_invite_code");
+    expect(advance("ask_invite_code", "with spaces extra").nextStep).toBe(
+      "ask_invite_code",
+    );
+  });
+});
+
+describe("onboarding/advance — photo step", () => {
+  it("accepts SKIP without media", () => {
+    const r = advance("ask_photo", "skip");
+    expect(r.nextStep).toBe("ask_preferred_genders");
+    expect(r.updates).toEqual({});
+  });
+  it("rejects non-skip text without media", () => {
+    const r = advance("ask_photo", "ok");
+    expect(r.nextStep).toBe("ask_photo");
+  });
+  it("accepts a JPEG attachment", () => {
+    const r = advance("ask_photo", "", {
+      media: { url: "https://x.com/p.jpg", contentType: "image/jpeg" },
+    });
+    expect(r.nextStep).toBe("ask_preferred_genders");
+    expect(r.updates.stats?.photoUrl).toBe("https://x.com/p.jpg");
+  });
+  it("rejects non-image media", () => {
+    const r = advance("ask_photo", "", {
+      media: { url: "https://x.com/v.mp4", contentType: "video/mp4" },
+    });
+    expect(r.nextStep).toBe("ask_photo");
   });
 });
 

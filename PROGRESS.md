@@ -659,3 +659,33 @@ expanded the Twilio-console section so they have a clear checklist.
 
 **Verified**
 - `npm run typecheck`, `npm test` (204/204), `npm run build`, `npm run lint` (0 warnings).
+
+---
+
+## 2026-05-17T19:31Z — Launch-ready, phase 1: invites + photo + auto-create
+
+**Shipped**
+- Schema: new `InviteCode` model (one-to-one with redeeming `User`); migration committed.
+- `src/invites/`: code helpers (`generateCode`, `normalizeCode`, `isWellFormed`, `formatForDisplay`) + Prisma adapter (`redeemCode`, `createInvite`, `createManyInvites`, `countUnredeemed`).
+- Onboarding state machine extended:
+  - Two new steps inserted: `ask_invite_code` (front of flow, gated by `INVITES_REQUIRED` env) and `ask_photo` (after height).
+  - `InboundMedia` threaded through `advance({media, config})`; photo step accepts an `image/*` MMS or `SKIP`.
+  - `OnboardingUpdates.inviteCodeToRedeem` directive — route handler atomically redeems before persisting the step.
+- Route handler:
+  - Reads Twilio's `NumMedia`/`MediaUrl0`/`MediaContentType0` into `RouteInput.media`.
+  - Auto-provisions a fresh `ONBOARDING` user when an unknown phone texts in (no more "unknown sender intro" dead-end).
+  - On invite advance, calls `redeemCode`; on failure swaps the outbound for a clarifying reply ("don't recognize that code" / "already used") and leaves the cursor on `ask_invite_code`.
+- Env: `INVITES_REQUIRED` (default true), plus reserved knobs for later (`ADMIN_TOKEN`, `SCHEDULER_ENABLED`, `SCHEDULER_CRON`, `SENTRY_DSN`, `SENTRY_TRACES_SAMPLE_RATE`).
+- Seed script: 5 fixed dev invite codes (`DEV12345`, `DEV2ABCD`, …) added.
+
+**Tests**
+- `tests/invites/code.test.ts` (5), `tests/invites/redeem.test.ts` (10): full coverage of code helpers + redemption transitions (fresh, normalized input, unknown, taken-by-other, taken-by-self, idempotent re-redeem, collision retry, exhaustion).
+- `tests/onboarding/flow.test.ts`: invite-step parser, photo-step parser (SKIP / image / non-image), env-flag pass-through.
+- `tests/twilio/conversation.test.ts`: invites-required vs invites-disabled entry behavior.
+- `tests/twilio/routes.test.ts`: auto-provision flow, successful redemption, malformed/unknown rejection.
+
+**Verified**
+- `npm run typecheck`, `npm test` (230/230), `npm run build`, `npm run lint` all clean.
+
+**Next agent: pick this up**
+- Daily-match scheduler (in-process cron + manual admin trigger), then admin endpoints (list users / view conversation / ban) gated by `ADMIN_TOKEN`.

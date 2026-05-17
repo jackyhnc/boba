@@ -189,12 +189,27 @@ async function upsertUser(u: SeedUser): Promise<void> {
   });
 }
 
+async function seedInvites(): Promise<void> {
+  // Fixed dev codes so the local team always has a known-good handful.
+  const DEV_CODES = ["DEV12345", "DEV2ABCD", "DEV3WXYZ", "PRINCE01", "FRIEND01"];
+  for (const code of DEV_CODES) {
+    await prisma.inviteCode.upsert({
+      where: { code },
+      create: { code, label: "dev-seed" },
+      update: {},
+    });
+    console.log(`  ✓ invite ${code}`);
+  }
+}
+
 async function main(): Promise<void> {
   console.log(`seeding ${SEED_USERS.length} users…`);
   for (const u of SEED_USERS) {
     await upsertUser(u);
     console.log(`  ✓ ${u.displayName} (${u.phone})`);
   }
+  console.log("seeding invite codes…");
+  await seedInvites();
   console.log("done.");
 }
 

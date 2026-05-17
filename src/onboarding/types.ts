@@ -16,11 +16,13 @@ import type { Gender } from "@prisma/client";
  */
 export const STEP_IDS = [
   "welcome",
+  "ask_invite_code",
   "ask_display_name",
   "ask_age",
   "ask_gender",
   "ask_profession",
   "ask_height_cm",
+  "ask_photo",
   "ask_preferred_genders",
   "ask_min_age",
   "ask_max_age",
@@ -47,6 +49,7 @@ export interface OnboardingUpdates {
     gender?: Gender;
     profession?: string;
     heightCm?: number;
+    photoUrl?: string;
   };
   preferences?: {
     preferredGenders?: Gender[];
@@ -54,6 +57,11 @@ export interface OnboardingUpdates {
     maxAge?: number;
     typeDescriptor?: string;
   };
+  /**
+   * Set during the `ask_invite_code` step. The route handler should call
+   * `redeemCode({userId, rawCode})` and short-circuit on failure.
+   */
+  inviteCodeToRedeem?: string;
 }
 
 export interface ParseSuccess {
@@ -82,3 +90,23 @@ export interface AdvanceResult {
   /** When true, the caller should flip the user's status to ACTIVE. */
   markActive: boolean;
 }
+
+/**
+ * Optional Twilio-supplied media attachment on the inbound SMS — used
+ * by the photo step. The flow itself doesn't care about content; the
+ * route handler is responsible for validating type/size and producing
+ * a URL the photo step can land in `stats.photoUrl`.
+ */
+export interface InboundMedia {
+  url: string;
+  contentType: string | null;
+}
+
+/** Optional environment knobs the flow consults. */
+export interface FlowConfig {
+  invitesRequired: boolean;
+}
+
+export const DEFAULT_FLOW_CONFIG: FlowConfig = {
+  invitesRequired: true,
+};

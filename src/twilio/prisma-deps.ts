@@ -22,6 +22,7 @@ export type TwilioPrisma = Pick<
   | "endOfDayDecision"
   | "rematchHistory"
   | "report"
+  | "inviteCode"
   | "$transaction"
 >;
 
