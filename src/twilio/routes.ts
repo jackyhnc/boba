@@ -20,6 +20,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { loadEnv } from "../config/env.js";
 import { prisma } from "../lib/prisma.js";
 import { createTwilioClient, type TwilioClient } from "./client.js";
+import { createAiPersonaClient, type AiPersonaClient } from "../ai/index.js";
 import {
   recordDecisionAndMaybeResolve,
   resolutionAnnouncement,
@@ -63,6 +64,8 @@ export interface RegisterOptions {
   deps?: {
     prisma?: TwilioPrisma;
     twilio?: TwilioClient;
+    /** Test override; otherwise built from env via `createAiPersonaClient`. */
+    aiPersonaClient?: AiPersonaClient | null;
   };
 }
 
@@ -74,6 +77,10 @@ export async function registerTwilioRoutes(
   const db = options.deps?.prisma ?? (prisma as unknown as TwilioPrisma);
   const twilio =
     options.deps?.twilio ?? createTwilioClient({ env, logger: app.log });
+  const aiPersona: AiPersonaClient | null =
+    options.deps?.aiPersonaClient !== undefined
+      ? options.deps.aiPersonaClient
+      : createAiPersonaClient({ env });
 
   app.post("/webhooks/twilio/inbound", async (req, reply) => {
     const params = (req.body ?? {}) as TwilioInboundParams;
@@ -212,6 +219,54 @@ export async function registerTwilioRoutes(
         create: { matchId: result.persistInbound!.matchId, milestone },
         update: {},
       });
+    }
+
+    // AI-seeding: if the partner is AI-backed, synthesize their reply
+    // here and inject it into the outbound list. The relay outbound was
+    // suppressed by the router. We persist the synthesized reply as an
+    // INBOUND from the AI user (because, from the human's perspective,
+    // it's a normal inbound coming back) — that keeps the milestone-
+    // unlock and decision flows symmetric.
+    if (result.aiReplyToGenerate && aiPersona) {
+      const req = result.aiReplyToGenerate;
+      try {
+        const { body: aiBody } = await aiPersona.generateReply({
+          matchId: req.matchId,
+          humanUserId: req.humanUserId,
+          aiUserId: req.aiUserId,
+          personaPrompt: req.personaPrompt,
+          latestInbound: { body: req.latestInbound.body, createdAtMs: Date.now() },
+          priorTurns: req.priorTurns,
+        });
+
+        // Persist as if it were an inbound from the AI partner. depthScore
+        // is left at 0; richer scoring can be added later.
+        await persistInboundMessage(db, {
+          matchId: req.matchId,
+          senderId: req.aiUserId,
+          body: aiBody,
+          depthScore: 0,
+          twilioSid: null,
+        });
+
+        // Send the AI's reply to the human user over SMS.
+        result.outbounds.push({
+          toPhone: req.humanUserPhone,
+          toUserId: req.humanUserId,
+          fromUserId: req.aiUserId,
+          body: aiBody,
+          isRelay: true,
+          matchId: req.matchId,
+          kind: "relay",
+        });
+      } catch (err) {
+        app.log.error({ err, matchId: req.matchId }, "ai persona reply failed");
+      }
+    } else if (result.aiReplyToGenerate && !aiPersona) {
+      app.log.debug(
+        { matchId: result.aiReplyToGenerate.matchId },
+        "ai partner inbound dropped: AI seeding disabled",
+      );
     }
 
     // Send each outbound and persist a Message row for it. Milestone

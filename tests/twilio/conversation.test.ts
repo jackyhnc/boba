@@ -28,7 +28,12 @@ function makeMatch(overrides: Partial<RouterActiveMatch> = {}): RouterActiveMatc
     id: "m1",
     userAId: "u_alice", // lex < "u_bob"
     userBId: "u_bob",
-    partner: { id: "u_bob", phone: PHONE_BOB },
+    partner: {
+      id: "u_bob",
+      phone: PHONE_BOB,
+      isAiBacked: false,
+      aiPersonaPrompt: null,
+    },
     priorMessages: [],
     unlockedMilestones: new Set(),
     ...overrides,
@@ -44,6 +49,61 @@ function makeInput(overrides: Partial<RouteInput> = {}): RouteInput {
     ...overrides,
   };
 }
+
+describe("route — AI partner routing", () => {
+  it("suppresses the relay outbound and emits an aiReplyToGenerate directive", () => {
+    const out = route(
+      makeInput({
+        body: "hey what are you up to",
+        sender: makeUser(),
+        activeMatch: makeMatch({
+          partner: {
+            id: "u_bob",
+            phone: PHONE_BOB,
+            isAiBacked: true,
+            aiPersonaPrompt: "warm and curious",
+          },
+        }),
+      }),
+    );
+    expect(out.outbounds.find((o) => o.kind === "relay")).toBeUndefined();
+    expect(out.aiReplyToGenerate).toMatchObject({
+      matchId: "m1",
+      humanUserId: "u_alice",
+      humanUserPhone: PHONE_ALICE,
+      aiUserId: "u_bob",
+      personaPrompt: "warm and curious",
+      latestInbound: { body: "hey what are you up to" },
+    });
+    // The inbound is still persisted normally so the matching/depth flow
+    // sees the human's message.
+    expect(out.persistInbound?.senderId).toBe("u_alice");
+  });
+
+  it("maps prior messages to fromAi correctly", () => {
+    const out = route(
+      makeInput({
+        body: "and you?",
+        activeMatch: makeMatch({
+          partner: {
+            id: "u_bob",
+            phone: PHONE_BOB,
+            isAiBacked: true,
+            aiPersonaPrompt: null,
+          },
+          priorMessages: [
+            { senderId: "u_alice", body: "hi", depthScore: 0 },
+            { senderId: "u_bob", body: "hi back", depthScore: 0 },
+          ],
+        }),
+      }),
+    );
+    expect(out.aiReplyToGenerate?.priorTurns).toEqual([
+      { fromAi: false, body: "hi" },
+      { fromAi: true, body: "hi back" },
+    ]);
+  });
+});
 
 describe("route — stat-fishing gate", () => {
   it("hard-flags an inbound asking for last name; zeroes depth; prepends warning to partner", () => {

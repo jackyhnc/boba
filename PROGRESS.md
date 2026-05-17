@@ -609,3 +609,39 @@ expanded the Twilio-console section so they have a clear checklist.
 
 **Next agent: pick this up**
 - Task: **AI-seeding plumbing** — when an inbound's *partner* is `isAiBacked=true`, route the relay through an LLM persona reply instead of sending the body verbatim back to the human. Disabled by default by an env flag; expose a stub `aiClient` interface so tests can inject.
+
+---
+
+## 2026-05-17T12:50Z — AI-seeding plumbing
+
+**Shipped**
+- `src/ai/persona.ts`:
+  - `AiPersonaClient` interface (one method: `generateReply(req)`).
+  - `StubAiPersonaClient` — deterministic, echoes a slice of the inbound with a rotating opener and a "What about you?" tail. Used in tests + dev fallback.
+  - `AnthropicAiPersonaClient` — thin `fetch`-based client targeting Anthropic's messages API. Defaults to `claude-haiku-4-5`. Builds a Boba-specific system prompt that bakes in the persona, SMS style, and the anti-doxx posture.
+- `src/ai/factory.ts` → `createAiPersonaClient({env, client?})` returns:
+  - `null` when `AI_SEEDING_ENABLED=false` (default),
+  - `AnthropicAiPersonaClient` when enabled + `ANTHROPIC_API_KEY` set,
+  - `StubAiPersonaClient` when enabled + no key (dev/test),
+  - throws in production with no key.
+- Router wiring:
+  - `RouterPartner` extended with `isAiBacked` + `aiPersonaPrompt`.
+  - When partner is AI-backed, relay outbound is suppressed and a new `aiReplyToGenerate` directive is emitted with the latest inbound + `priorTurns` (mapped to `fromAi` flags).
+- Route handler:
+  - Calls the persona client when both directive and client are present.
+  - Persists the AI's reply as an INBOUND from the AI partner (so milestone/depth flows stay symmetric) and sends it over SMS to the human user.
+  - Logs and drops the directive when AI seeding is disabled.
+  - `RegisterOptions.deps.aiPersonaClient` accepts test overrides (including explicit `null`).
+
+**Tests**
+- `tests/ai/persona.test.ts` (13 cases):
+  - Stub: echoes inbound + opener rotation across turns.
+  - Anthropic client: rejects empty key; assembles system+messages payload (verifies headers, system prompt content, role mapping); throws on non-2xx and empty content.
+  - Factory: null when disabled, Anthropic when key, stub fallback in dev, refusal in prod, override.
+- `tests/twilio/conversation.test.ts`: 2 new cases — relay suppression + correct directive shape; prior-turn `fromAi` mapping.
+
+**Verified**
+- `npm run typecheck`, `npm test`, `npm run build`, `npm run lint` clean. 204/204 pass.
+
+**Next agent: pick this up**
+- Task: **Tests audit** + **seed script** (Postgres docker + fake-user generator) + write `BUILD_COMPLETE` once the checklist clears.

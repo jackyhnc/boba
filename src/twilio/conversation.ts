@@ -56,6 +56,8 @@ export interface RouterUser {
 export interface RouterPartner {
   id: string;
   phone: string;
+  isAiBacked: boolean;
+  aiPersonaPrompt: string | null;
 }
 
 /** Active-match context loaded by the IO layer. */
@@ -160,6 +162,22 @@ export interface RouteResult {
    * `recordReport` / `incrementReportCount` accordingly.
    */
   moderation: ModerationDirective | null;
+  /**
+   * Set when the partner is AI-backed: the route handler should generate
+   * a reply via the `AiPersonaClient` and send it back to the human user.
+   * The relay outbound has already been suppressed by the router.
+   */
+  aiReplyToGenerate: {
+    matchId: string;
+    /** The human user the AI will reply TO. */
+    humanUserId: string;
+    humanUserPhone: string;
+    /** The AI-backed partner whose persona we generate as. */
+    aiUserId: string;
+    personaPrompt: string | null;
+    latestInbound: { body: string };
+    priorTurns: ReadonlyArray<{ fromAi: boolean; body: string }>;
+  } | null;
 }
 
 export type ModerationDirective =
@@ -227,6 +245,7 @@ export function route(input: RouteInput): RouteResult {
       onboardingAdvance: null,
       decisionToRecord: null,
       moderation: null,
+      aiReplyToGenerate: null,
     };
   }
 
@@ -243,6 +262,7 @@ export function route(input: RouteInput): RouteResult {
         onboardingAdvance: null,
         decisionToRecord: null,
         moderation: null,
+        aiReplyToGenerate: null,
       };
 
     case "PAUSED":
@@ -253,6 +273,7 @@ export function route(input: RouteInput): RouteResult {
         onboardingAdvance: null,
         decisionToRecord: null,
         moderation: null,
+        aiReplyToGenerate: null,
       };
 
     case "ONBOARDING":
@@ -277,6 +298,7 @@ function routeOnboarding(user: RouterUser, body: string): RouteResult {
     onboardingAdvance: { userId: user.id, advance: adv },
     decisionToRecord: null,
     moderation: null,
+    aiReplyToGenerate: null,
   };
 }
 
@@ -293,6 +315,7 @@ function routeActive(
       onboardingAdvance: null,
       decisionToRecord: null,
       moderation: null,
+      aiReplyToGenerate: null,
     };
   }
 
@@ -322,6 +345,7 @@ function routeActive(
         reason: report.reason,
         details: report.details,
       },
+      aiReplyToGenerate: null,
     };
   }
 
@@ -354,6 +378,7 @@ function routeActive(
         decision: decisionKeyword,
       },
       moderation: null,
+      aiReplyToGenerate: null,
     };
   }
 
@@ -401,18 +426,22 @@ function routeActive(
     ? `${prependedWarning(gatedCategories)}\n${body}`
     : body;
 
-  const outbounds: OutboundAction[] = [
-    // Relay to partner.
-    {
-      toPhone: active.partner.phone,
-      toUserId: active.partner.id,
-      fromUserId: user.id,
-      body: relayedBody,
-      isRelay: true,
-      matchId: active.id,
-      kind: "relay",
-    },
-  ];
+  // When the partner is AI-backed, we don't relay over SMS — the route
+  // handler will instead call the AI persona client and send the
+  // generated reply back to the sender. Suppress the relay outbound.
+  const outbounds: OutboundAction[] = active.partner.isAiBacked
+    ? []
+    : [
+        {
+          toPhone: active.partner.phone,
+          toUserId: active.partner.id,
+          fromUserId: user.id,
+          body: relayedBody,
+          isRelay: true,
+          matchId: active.id,
+          kind: "relay",
+        },
+      ];
 
   const milestonesToRecord: MilestoneType[] = [];
   if (unlock.milestone) {
@@ -444,6 +473,21 @@ function routeActive(
     );
   }
 
+  const aiReplyToGenerate = active.partner.isAiBacked
+    ? {
+        matchId: active.id,
+        humanUserId: user.id,
+        humanUserPhone: user.phone,
+        aiUserId: active.partner.id,
+        personaPrompt: active.partner.aiPersonaPrompt,
+        latestInbound: { body },
+        priorTurns: active.priorMessages.map((m) => ({
+          fromAi: m.senderId === active.partner.id,
+          body: m.body,
+        })),
+      }
+    : null;
+
   return {
     outbounds,
     persistInbound: {
@@ -467,6 +511,7 @@ function routeActive(
           tags: harassment.matches,
         }
       : null,
+    aiReplyToGenerate,
   };
 }
 

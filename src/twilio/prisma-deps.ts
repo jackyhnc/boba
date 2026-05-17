@@ -72,8 +72,8 @@ export async function loadActiveMatchForUser(
       id: true,
       userAId: true,
       userBId: true,
-      userA: { select: { id: true, phone: true } },
-      userB: { select: { id: true, phone: true } },
+      userA: { select: { id: true, phone: true, isAiBacked: true, aiPersonaPrompt: true } },
+      userB: { select: { id: true, phone: true, isAiBacked: true, aiPersonaPrompt: true } },
       messages: {
         orderBy: { createdAt: "asc" },
         select: { senderId: true, body: true, depthScore: true },
@@ -87,7 +87,12 @@ export async function loadActiveMatchForUser(
 
   return {
     id: match.id,
-    partner: { id: partner.id, phone: partner.phone },
+    partner: {
+      id: partner.id,
+      phone: partner.phone,
+      isAiBacked: partner.isAiBacked,
+      aiPersonaPrompt: partner.aiPersonaPrompt,
+    },
     userAId: match.userAId,
     userBId: match.userBId,
     priorMessages: match.messages,
