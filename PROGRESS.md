@@ -538,3 +538,24 @@ expanded the Twilio-console section so they have a clear checklist.
 
 **Next agent: pick this up**
 - Task: **Rematch eligibility logic** — query helper that, given a candidate pair and today's date, returns whether they may be rematched. Honors RematchHistory.hasDiscard (never), respects a cooldown window (e.g. 14 days), and excludes pairs already matched today. Use from the matching selector.
+
+---
+
+## 2026-05-17T12:19Z — Rematch eligibility
+
+**Shipped**
+- `src/rematch/index.ts` — first-class eligibility predicate + Prisma helpers.
+  - `isEligibleForRematch({history, today, config})` returns `{eligible, reason, cooldownRemainingDays}`.
+  - Rules: `hasDiscard` permanently blocks; otherwise eligible iff `dayDiff(lastMatchedOn, today) >= rematchCooldownDays` (default 14).
+  - `loadPairHistoryFor(prisma, userIds)` — bulk-loads `RematchHistory` rows and keys them by canonical pair-key for `SelectorContext.pairHistory`.
+  - `loadHistoryForPair(prisma, a, b)` — single-pair convenience.
+- The selector still inlines the same rule via `pairEligibleByHistory`; the new module is a public surface for any future caller (UIs, debugging, scheduled jobs) and is the canonical place to evolve the rule.
+
+**Tests**
+- `tests/rematch/eligibility.test.ts` (10 cases): never matched, discard, within/after cooldown, config override, exact-boundary, bulk load, normalized pair-order.
+
+**Verified**
+- `npm run typecheck`, `npm test` clean. 162/162 pass.
+
+**Next agent: pick this up**
+- Task: **Anti-doxxing filter** — content filter that flags inbound messages asking for identifying info (name, school, instagram, photo) before reveals unlock. Set `Message.flaggedStatFishing = true` and (optionally) replace the relayed body with a softened version or block reveal progress for that message.
