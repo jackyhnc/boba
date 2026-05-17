@@ -1,0 +1,20 @@
+// Boba — Prisma schema
+// The full domain model lands in the next overnight task ("Data model").
+// A single sentinel model is included here so `prisma generate` produces
+// a valid client and the rest of the codebase compiles.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Sentinel — will be replaced/extended in the data-model task.
+model SchemaMarker {
+  id        Int      @id @default(autoincrement())
+  version   String   @unique
+  createdAt DateTime @default(now())
+}
