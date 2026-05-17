@@ -1,6 +1,10 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import sensible from "@fastify/sensible";
 import formbody from "@fastify/formbody";
+import {
+  registerAdminRoutes,
+  type RegisterAdminOptions,
+} from "./admin/routes.js";
 import { loadEnv } from "./config/env.js";
 import { prisma } from "./lib/prisma.js";
 import { registerHealthRoutes } from "./routes/health.js";
@@ -25,6 +29,7 @@ declare module "fastify" {
 
 export interface BuildAppOptions {
   twilio?: TwilioRegisterOptions;
+  admin?: RegisterAdminOptions;
   /** Test override for the scheduler's Prisma surface + Twilio client. */
   scheduler?: {
     prisma?: MatchingPrisma & PhoneLookup;
@@ -62,6 +67,8 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
 
   await registerHealthRoutes(app);
   await registerTwilioRoutes(app, options.twilio ?? {});
+  // Admin routes registered AFTER scheduler decoration so the trigger
+  // endpoint can rely on `app.runDailyMatch`.
 
   // Daily-match scheduler. The runner is always attached (so the admin
   // endpoint can fire it on demand); the cron is only registered when
@@ -95,6 +102,8 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
       "scheduler started",
     );
   }
+
+  await registerAdminRoutes(app, options.admin ?? {});
 
   return app;
 }

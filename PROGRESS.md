@@ -710,3 +710,29 @@ expanded the Twilio-console section so they have a clear checklist.
 
 **Next agent: pick this up**
 - Admin endpoints (`/admin/users`, `/admin/match/:id`, `/admin/users/:id/ban`, `/admin/run-daily-match`) gated by `ADMIN_TOKEN`.
+
+---
+
+## 2026-05-17T19:40Z — Admin endpoints
+
+**Shipped**
+- `src/admin/auth.ts` — `makeAdminAuth({expected})` Fastify preHandler. Constant-time compare; 503 when ADMIN_TOKEN empty (admin off), 401 on missing/wrong header, pass-through on match.
+- `src/admin/prisma-deps.ts` — `listUsers` (paginated cursor + status filter), `getConversation` (match + messages with flag fields), `banUser` / `unbanUser` (returns before/after status).
+- `src/admin/routes.ts` registers under `/admin/*`:
+  - `GET /admin/users?limit=&cursor=&status=`
+  - `GET /admin/match/:id`
+  - `POST /admin/users/:id/ban`
+  - `POST /admin/users/:id/unban`
+  - `POST /admin/run-daily-match` → calls `app.runDailyMatch()`
+  - `POST /admin/invites/bulk` → `{count, label?}` body, returns codes + remaining-unredeemed count
+- `src/app.ts` wires it in after scheduler decoration so the trigger endpoint has access.
+
+**Tests**
+- `tests/admin/auth.test.ts` (5): empty-token / missing-header / wrong-token / correct-token / length-mismatch paths.
+- `tests/admin/routes.test.ts` (9): full happy paths + 404s + the bulk-invite endpoint + run-daily-match wiring.
+
+**Verified**
+- typecheck, test (251/251), build, lint all clean.
+
+**Next agent: pick this up**
+- Deploy configs (Dockerfile, render.yaml, fly.toml, /readyz endpoint), GitHub Actions CI, Sentry hooks, DEPLOY.md.
