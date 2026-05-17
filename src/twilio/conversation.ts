@@ -19,6 +19,12 @@ import {
   replyForOwnDecision,
 } from "../decisions/flow.js";
 import {
+  detectHarassment,
+  parseReportCommand,
+  REPORT_ACK,
+  type HarassmentDetection,
+} from "../safety/moderation.js";
+import {
   detectStatFishing,
   shouldGateBy,
   type StatFishDetection,
@@ -106,7 +112,8 @@ export interface OutboundAction {
     | "relay"
     | "milestone_reveal"
     | "decision_ack"
-    | "decision_announcement";
+    | "decision_announcement"
+    | "report_ack";
 }
 
 /** Directive for persisting the inbound `Message` row, if applicable. */
@@ -117,6 +124,7 @@ export interface PersistInbound {
   body: string;
   depthScore: number;
   flaggedStatFishing: boolean;
+  flaggedHarassment: boolean;
 }
 
 export interface RouteResult {
@@ -146,7 +154,29 @@ export interface RouteResult {
     partnerUserId: string;
     decision: Decision;
   } | null;
+  /**
+   * Set when the inbound was a REPORT command (user-initiated) or hit a
+   * severe harassment probe (system-initiated). The caller should call
+   * `recordReport` / `incrementReportCount` accordingly.
+   */
+  moderation: ModerationDirective | null;
 }
+
+export type ModerationDirective =
+  | {
+      kind: "user_report";
+      reporterId: string;
+      subjectId: string;
+      reason: string;
+      details: string | null;
+    }
+  | {
+      kind: "auto_flag";
+      subjectId: string;
+      matchId: string;
+      severe: boolean;
+      tags: string[];
+    };
 
 // ─── Copy ───────────────────────────────────────────────────────────────────
 
@@ -196,6 +226,7 @@ export function route(input: RouteInput): RouteResult {
       milestonesToRecord: [],
       onboardingAdvance: null,
       decisionToRecord: null,
+      moderation: null,
     };
   }
 
@@ -211,6 +242,7 @@ export function route(input: RouteInput): RouteResult {
         milestonesToRecord: [],
         onboardingAdvance: null,
         decisionToRecord: null,
+        moderation: null,
       };
 
     case "PAUSED":
@@ -220,6 +252,7 @@ export function route(input: RouteInput): RouteResult {
         milestonesToRecord: [],
         onboardingAdvance: null,
         decisionToRecord: null,
+        moderation: null,
       };
 
     case "ONBOARDING":
@@ -243,6 +276,7 @@ function routeOnboarding(user: RouterUser, body: string): RouteResult {
     milestonesToRecord: [],
     onboardingAdvance: { userId: user.id, advance: adv },
     decisionToRecord: null,
+    moderation: null,
   };
 }
 
@@ -258,6 +292,36 @@ function routeActive(
       milestonesToRecord: [],
       onboardingAdvance: null,
       decisionToRecord: null,
+      moderation: null,
+    };
+  }
+
+  // REPORT command intercept. Files a report against the partner.
+  const report = parseReportCommand(body);
+  if (report) {
+    return {
+      outbounds: [
+        {
+          toPhone: user.phone,
+          toUserId: user.id,
+          fromUserId: null,
+          body: REPORT_ACK,
+          isRelay: false,
+          matchId: active.id,
+          kind: "report_ack",
+        },
+      ],
+      persistInbound: null,
+      milestonesToRecord: [],
+      onboardingAdvance: null,
+      decisionToRecord: null,
+      moderation: {
+        kind: "user_report",
+        reporterId: user.id,
+        subjectId: active.partner.id,
+        reason: report.reason,
+        details: report.details,
+      },
     };
   }
 
@@ -289,8 +353,13 @@ function routeActive(
         partnerUserId: active.partner.id,
         decision: decisionKeyword,
       },
+      moderation: null,
     };
   }
+
+  // Harassment auto-flag — runs BEFORE the stat-fishing pass so a slur
+  // disguised as a "question" still triggers the right path.
+  const harassment = detectHarassment(body);
 
   // Stat-fishing detection. We only *gate* (zero depth, prepend warning)
   // on categories whose milestone hasn't unlocked yet.
@@ -384,10 +453,20 @@ function routeActive(
       body,
       depthScore,
       flaggedStatFishing: hardFlag,
+      flaggedHarassment: harassment.flagged,
     },
     milestonesToRecord,
     onboardingAdvance: null,
     decisionToRecord: null,
+    moderation: harassment.flagged
+      ? {
+          kind: "auto_flag",
+          subjectId: user.id,
+          matchId: active.id,
+          severe: harassment.severe,
+          tags: harassment.matches,
+        }
+      : null,
   };
 }
 
@@ -398,7 +477,7 @@ function prependedWarning(categories: string[]): string {
 }
 
 // Re-export for tests + telemetry.
-export type { StatFishDetection };
+export type { HarassmentDetection, StatFishDetection };
 
 function systemReply(
   user: RouterUser,

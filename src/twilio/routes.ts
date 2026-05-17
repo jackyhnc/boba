@@ -25,6 +25,10 @@ import {
   resolutionAnnouncement,
 } from "../decisions/index.js";
 import { persistOnboardingUpdates } from "../onboarding/prisma-deps.js";
+import {
+  incrementReportCount,
+  recordReport,
+} from "../safety/prisma-deps.js";
 import { route, renderRevealBody, type OutboundAction } from "./conversation.js";
 import {
   findUserByPhone,
@@ -113,8 +117,35 @@ export async function registerTwilioRoutes(
         depthScore: result.persistInbound.depthScore,
         twilioSid: messageSid,
         flaggedStatFishing: result.persistInbound.flaggedStatFishing,
+        flaggedHarassment: result.persistInbound.flaggedHarassment,
       });
       inboundRowId = inbound.id;
+    }
+
+    // Moderation actions (user REPORT or system auto-flag from harassment).
+    if (result.moderation) {
+      if (result.moderation.kind === "user_report") {
+        await recordReport(db, {
+          reporterId: result.moderation.reporterId,
+          subjectId: result.moderation.subjectId,
+          reason: result.moderation.reason,
+          details: result.moderation.details,
+        });
+      } else {
+        // System auto-flag: bump the sender's reportCount on severe hits.
+        if (result.moderation.severe) {
+          await incrementReportCount(db, result.moderation.subjectId);
+        }
+        app.log.warn(
+          {
+            subjectId: result.moderation.subjectId,
+            matchId: result.moderation.matchId,
+            tags: result.moderation.tags,
+            severe: result.moderation.severe,
+          },
+          "moderation auto-flag",
+        );
+      }
     }
 
     // Apply onboarding advance (if any) BEFORE we send the reply, so the

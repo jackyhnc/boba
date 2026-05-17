@@ -63,10 +63,15 @@ function makeFakeDb(): {
       update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
         const u = users.find((x) => x.id === where.id);
         if (!u) throw new Error(`no user ${where.id}`);
+        const rec = u as unknown as Record<string, unknown>;
         for (const [k, v] of Object.entries(data)) {
-          (u as unknown as Record<string, unknown>)[k] = v;
+          if (v && typeof v === "object" && "increment" in (v as Record<string, unknown>)) {
+            rec[k] = ((rec[k] as number | undefined) ?? 0) + ((v as { increment: number }).increment);
+          } else {
+            rec[k] = v;
+          }
         }
-        return u;
+        return { ...u, reportCount: (rec.reportCount as number) ?? 0, status: u.status };
       },
     },
     stats: {
@@ -194,6 +199,11 @@ function makeFakeDb(): {
     rematchHistory: {
       upsert: async () => ({}),
     },
+    report: {
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        return { id: `r_${(data as { reporterId: string }).reporterId}_${Date.now()}` };
+      },
+    },
     $transaction: async <T,>(fn: (tx: unknown) => Promise<T>) => fn(db),
   } as unknown as TwilioPrisma;
 
@@ -304,6 +314,44 @@ describe("POST /webhooks/twilio/inbound", () => {
       direction: "OUTBOUND",
     });
     expect(upsertedMilestones).toEqual([]);
+    await app.close();
+  });
+
+  it("REPORT keyword acks and increments partner's report count", async () => {
+    const { db, users, matches } = makeFakeDb();
+    users.push(
+      { id: "u_alice", phone: "+15550000001", displayName: "Alice", status: "ACTIVE", onboardingStep: null },
+      { id: "u_bob", phone: "+15550000002", displayName: "Bob", status: "ACTIVE", onboardingStep: null },
+    );
+    matches.push({
+      id: "m_today",
+      userAId: "u_alice",
+      userBId: "u_bob",
+      state: "ACTIVE",
+      matchDate: new Date(),
+      messages: [],
+      milestones: [],
+    });
+
+    const { client, calls } = makeFakeTwilio();
+    const app = await buildApp({ twilio: { deps: { prisma: db, twilio: client } } });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/webhooks/twilio/inbound",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams({
+        From: "+15550000001",
+        Body: "REPORT harassment: keeps sending nudes",
+        MessageSid: "SM" + "r".repeat(32),
+      }).toString(),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.to).toBe("+15550000001");
+    expect(calls[0]!.body).toMatch(/logged it/i);
+    const bob = users.find((u) => u.id === "u_bob")! as unknown as { reportCount?: number };
+    expect(bob.reportCount).toBe(1);
     await app.close();
   });
 

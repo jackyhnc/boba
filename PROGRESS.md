@@ -583,3 +583,29 @@ expanded the Twilio-console section so they have a clear checklist.
 
 **Next agent: pick this up**
 - Task: **Moderation hooks** — profanity/harassment regex + `Report` row flow (e.g. REPORT keyword from an SMS opens a report, increments `User.reportCount`).
+
+---
+
+## 2026-05-17T12:44Z — Moderation hooks
+
+**Shipped**
+- `src/safety/moderation.ts` (pure):
+  - `detectHarassment(body)` — 4 categories (slur/threat/sexual_coercion/profanity), with a `severe` flag for the first three.
+  - `parseReportCommand(body)` — accepts `REPORT`, `REPORT <reason>`, `REPORT <reason>: <details>`.
+- `src/safety/prisma-deps.ts`:
+  - `recordReport`: transactional — creates `Report`, increments `User.reportCount`, auto-bans (`status=BANNED`) on threshold (default 3, configurable).
+  - `incrementReportCount`: silent bump (system auto-flags).
+- Router wiring:
+  - `REPORT <…>` from a user with an active match → emits `report_ack` outbound + `moderation.kind="user_report"` directive; route handler calls `recordReport`.
+  - A harassment hit on a relayed message marks `Message.flaggedHarassment = true` and (if severe) bumps the sender's report count via `moderation.kind="auto_flag"`.
+- New OutboundAction kind `report_ack`. `TwilioPrisma` extended with `report`.
+
+**Tests**
+- `tests/safety/moderation.test.ts` (16 cases): detector edge cases + report-command parsing + Prisma adapter (auto-ban at threshold, custom threshold, silent increment).
+- `tests/twilio/routes.test.ts`: REPORT-keyword flow — ack body matches, partner's report count bumps.
+
+**Verified**
+- `npm run typecheck`, `npm test`, `npm run build`, `npm run lint` clean. 191/191 pass.
+
+**Next agent: pick this up**
+- Task: **AI-seeding plumbing** — when an inbound's *partner* is `isAiBacked=true`, route the relay through an LLM persona reply instead of sending the body verbatim back to the human. Disabled by default by an env flag; expose a stub `aiClient` interface so tests can inject.
