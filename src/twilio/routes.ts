@@ -20,6 +20,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { loadEnv } from "../config/env.js";
 import { prisma } from "../lib/prisma.js";
 import { createTwilioClient, type TwilioClient } from "./client.js";
+import { persistOnboardingUpdates } from "../onboarding/prisma-deps.js";
 import { route, renderRevealBody, type OutboundAction } from "./conversation.js";
 import {
   findUserByPhone,
@@ -109,6 +110,19 @@ export async function registerTwilioRoutes(
         twilioSid: messageSid,
       });
       inboundRowId = inbound.id;
+    }
+
+    // Apply onboarding advance (if any) BEFORE we send the reply, so the
+    // cursor stored on the user reflects what we're about to ask.
+    if (result.onboardingAdvance) {
+      const { userId, advance } = result.onboardingAdvance;
+      await persistOnboardingUpdates(
+        db,
+        userId,
+        advance.updates,
+        advance.nextStep,
+        advance.markActive,
+      );
     }
 
     // Record milestones BEFORE sending the reveal SMS so the unlock is

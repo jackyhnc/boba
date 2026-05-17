@@ -487,3 +487,28 @@ expanded the Twilio-console section so they have a clear checklist.
 - Generate the first migration (`npm run prisma:migrate -- --name init` — requires Docker Postgres up, which the next agent can spin up).
 - Update `src/lib/prisma.ts` if anything changes.
 - Add a small smoke test that imports `PrismaClient` and constructs it.
+
+---
+
+## 2026-05-17T11:55Z — Onboarding state machine
+
+**Shipped**
+- `src/onboarding/{types,flow,prisma-deps,index}.ts` — pure linear state machine driven by `User.onboardingStep`.
+- 11 steps: welcome → ask_display_name → age → gender → profession → height_cm → preferred_genders → min_age → max_age → type_descriptor → campus_email_domain → done.
+- Per-step parsers validate input and return either updates + next-step or a clarifying retry reply (e.g. "Age must be 18–99").
+- `mergeUpdates` helper for accumulating multi-step changes.
+- Wired into `routeOnboarding` in `src/twilio/conversation.ts`. `RouterUser` gained `onboardingStep`; `RouteResult` gained `onboardingAdvance` so the route handler can apply updates atomically.
+- `persistOnboardingUpdates` upserts Stats + Preferences and flips `status → ACTIVE` (clearing `onboardingStep`) on the final step.
+- Migration: `prisma/migrations/<ts>_onboarding_step/migration.sql` adds `User.onboardingStep TEXT NULL`.
+- Tests: new `tests/onboarding/flow.test.ts` (25 cases). Existing conversation + routes suites extended to cover the new ONBOARDING flow + fake-db now supports `user.update`, `stats.upsert`, `preferences.upsert`.
+
+**Verified**
+- `npm run typecheck` clean.
+- `npm test` — 137/137 pass (was 112).
+- `npm run build` clean.
+
+**Didn't try / deferred**
+- Did not run `prisma migrate dev` — Docker unavailable; SQL committed and will apply on first local `npm run db:up && npm run prisma:migrate`.
+
+**Next agent: pick this up**
+- Task: **End-of-day Keep/Maybe/Discard flow + resolution logic**.

@@ -13,7 +13,7 @@ import type { RouterActiveMatch, RouterUser } from "./conversation.js";
 
 export type TwilioPrisma = Pick<
   PrismaClient,
-  "user" | "dailyMatch" | "message" | "milestoneProgress"
+  "user" | "dailyMatch" | "message" | "milestoneProgress" | "stats" | "preferences"
 >;
 
 /**
@@ -26,9 +26,19 @@ export async function findUserByPhone(
 ): Promise<RouterUser | null> {
   const user = await prisma.user.findUnique({
     where: { phone },
-    select: { id: true, phone: true, displayName: true, status: true },
+    select: {
+      id: true,
+      phone: true,
+      displayName: true,
+      status: true,
+      onboardingStep: true,
+    },
   });
-  return user;
+  if (!user) return null;
+  return {
+    ...user,
+    onboardingStep: user.onboardingStep as RouterUser["onboardingStep"],
+  };
 }
 
 /**

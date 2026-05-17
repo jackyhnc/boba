@@ -16,6 +16,7 @@ interface FakeUser {
   phone: string;
   displayName: string | null;
   status: "ACTIVE" | "ONBOARDING" | "PAUSED" | "BANNED";
+  onboardingStep: string | null;
   stats?: { age: number | null; profession: string | null; heightCm: number | null };
 }
 
@@ -51,8 +52,42 @@ function makeFakeDb(): {
         if (select?.stats) {
           return { stats: u.stats ?? null };
         }
-        return { id: u.id, phone: u.phone, displayName: u.displayName, status: u.status };
+        return {
+          id: u.id,
+          phone: u.phone,
+          displayName: u.displayName,
+          status: u.status,
+          onboardingStep: u.onboardingStep,
+        };
       },
+      update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+        const u = users.find((x) => x.id === where.id);
+        if (!u) throw new Error(`no user ${where.id}`);
+        for (const [k, v] of Object.entries(data)) {
+          (u as unknown as Record<string, unknown>)[k] = v;
+        }
+        return u;
+      },
+    },
+    stats: {
+      upsert: async ({ where, create, update }: { where: { userId: string }; create: Record<string, unknown>; update: Record<string, unknown> }) => {
+        const u = users.find((x) => x.id === where.userId);
+        if (!u) throw new Error(`no user ${where.userId}`);
+        // Track minimal stats fields used by the test view of FakeUser.
+        const base = (u.stats ?? { age: null, profession: null, heightCm: null }) as Record<string, unknown>;
+        if (!u.stats) {
+          u.stats = { age: null, profession: null, heightCm: null };
+        }
+        for (const [k, v] of Object.entries({ ...create, ...update })) {
+          if (k === "age" || k === "profession" || k === "heightCm") {
+            (u.stats as Record<string, unknown>)[k] = v as never;
+          }
+        }
+        return { ...base };
+      },
+    },
+    preferences: {
+      upsert: async () => ({}),
     },
     dailyMatch: {
       findFirst: async ({ where }: { where: { state: string; OR: Array<{ userAId?: string; userBId?: string }> } }) => {
@@ -174,8 +209,8 @@ describe("POST /webhooks/twilio/inbound", () => {
   it("relays inbound from ACTIVE user with a live match", async () => {
     const { db, users, matches, insertedMessages, upsertedMilestones } = makeFakeDb();
     users.push(
-      { id: "u_alice", phone: "+15550000001", displayName: "Alice", status: "ACTIVE", stats: { age: 22, profession: "physics", heightCm: 170 } },
-      { id: "u_bob", phone: "+15550000002", displayName: "Bob", status: "ACTIVE", stats: { age: 24, profession: "designer", heightCm: 180 } },
+      { id: "u_alice", phone: "+15550000001", displayName: "Alice", status: "ACTIVE", onboardingStep: null, stats: { age: 22, profession: "physics", heightCm: 170 } },
+      { id: "u_bob", phone: "+15550000002", displayName: "Bob", status: "ACTIVE", onboardingStep: null, stats: { age: 24, profession: "designer", heightCm: 180 } },
     );
     matches.push({
       id: "m_today",
@@ -229,6 +264,7 @@ describe("POST /webhooks/twilio/inbound", () => {
       phone: "+15550001001",
       displayName: null,
       status: "ONBOARDING",
+      onboardingStep: null,
     });
     const { client, calls } = makeFakeTwilio();
     const app = await buildApp({ twilio: { deps: { prisma: db, twilio: client } } });
@@ -246,7 +282,10 @@ describe("POST /webhooks/twilio/inbound", () => {
     expect(res.statusCode).toBe(200);
     expect(calls).toHaveLength(1);
     expect(calls[0]!.to).toBe("+15550001001");
-    expect(calls[0]!.body).toMatch(/onboarding/i);
+    expect(calls[0]!.body).toMatch(/Welcome to Boba/);
+    // After the welcome the user's cursor is at ask_display_name.
+    const onb = users.find((u) => u.id === "u_onb")!;
+    expect(onb.onboardingStep).toBe("ask_display_name");
     expect(insertedMessages).toEqual([]);
     await app.close();
   });

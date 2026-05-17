@@ -38,7 +38,7 @@ Boba is a dating app built around conversation before appearance. Anti-swipe, an
 - [x] Matching algorithm v1: type-fit scoring, daily match selection, no-repeats (except rematch logic), basic compatibility scoring
 - [x] Milestone system: message-count + simple depth signals (length, question ratio) → unlock thresholds for age/profession/height/face
 - [x] iMessage relay layer (Twilio webhook handlers — full inbound/outbound routing logic, signature verification, conversation state machine; credentials stubbed)
-- [ ] Onboarding state machine driven by SMS
+- [x] Onboarding state machine driven by SMS
 - [ ] End-of-day Keep/Maybe/Discard flow + resolution logic
 - [ ] Rematch eligibility logic
 - [ ] Anti-doxxing: content filter for stat-fishing questions (name/school/instagram/photo asks) before reveals unlock

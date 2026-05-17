@@ -18,6 +18,7 @@ function makeUser(overrides: Partial<RouterUser> = {}): RouterUser {
     phone: PHONE_ALICE,
     displayName: "Alice",
     status: "ACTIVE",
+    onboardingStep: null,
     ...overrides,
   };
 }
@@ -91,16 +92,45 @@ describe("route — by user status", () => {
     expect(out.persistInbound).toBeNull();
   });
 
-  it("ONBOARDING returns the onboarding holding reply", () => {
+  it("ONBOARDING (no step yet) sends the welcome and advances to ask_display_name", () => {
     const out = route(
-      makeInput({ sender: makeUser({ status: "ONBOARDING" }), activeMatch: null }),
+      makeInput({
+        sender: makeUser({ status: "ONBOARDING", onboardingStep: null }),
+        activeMatch: null,
+      }),
     );
     expect(out.outbounds).toHaveLength(1);
-    expect(out.outbounds[0]).toMatchObject({
-      kind: "onboarding_stub",
-      body: COPY.onboardingStub,
-    });
+    expect(out.outbounds[0]).toMatchObject({ kind: "onboarding_stub" });
+    expect(out.outbounds[0]!.body).toMatch(/Welcome to Boba/);
     expect(out.persistInbound).toBeNull();
+    expect(out.onboardingAdvance).toMatchObject({
+      userId: "u_alice",
+      advance: { nextStep: "ask_display_name", markActive: false },
+    });
+  });
+
+  it("ONBOARDING parse failure stays on the same step", () => {
+    const out = route(
+      makeInput({
+        body: "not a number",
+        sender: makeUser({ status: "ONBOARDING", onboardingStep: "ask_age" }),
+        activeMatch: null,
+      }),
+    );
+    expect(out.onboardingAdvance?.advance.nextStep).toBe("ask_age");
+    expect(out.outbounds[0]!.body).toMatch(/number/i);
+  });
+
+  it("ONBOARDING parse success advances and writes updates", () => {
+    const out = route(
+      makeInput({
+        body: "22",
+        sender: makeUser({ status: "ONBOARDING", onboardingStep: "ask_age" }),
+        activeMatch: null,
+      }),
+    );
+    expect(out.onboardingAdvance?.advance.nextStep).toBe("ask_gender");
+    expect(out.onboardingAdvance?.advance.updates.stats?.age).toBe(22);
   });
 
   it("ACTIVE with no match returns the holding pattern", () => {

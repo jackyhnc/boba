@@ -20,6 +20,11 @@ import {
   type MessageForUnlock,
 } from "../milestones/index.js";
 import type { MessageForDepth } from "../milestones/types.js";
+import { advance as advanceOnboarding } from "../onboarding/flow.js";
+import type {
+  AdvanceResult as OnboardingAdvance,
+  StepId as OnboardingStepId,
+} from "../onboarding/types.js";
 
 // ─── Inputs ─────────────────────────────────────────────────────────────────
 
@@ -29,6 +34,7 @@ export interface RouterUser {
   phone: string;
   displayName: string | null;
   status: UserStatus;
+  onboardingStep: OnboardingStepId | null;
 }
 
 /** Minimal partner shape needed for relay. */
@@ -107,6 +113,14 @@ export interface RouteResult {
   persistInbound: PersistInbound | null;
   /** Milestones to record for this match after persistInbound is written. */
   milestonesToRecord: MilestoneType[];
+  /**
+   * When set, the caller should apply this onboarding advance: persist
+   * the updates + cursor + (maybe) flip status to ACTIVE.
+   */
+  onboardingAdvance: {
+    userId: string;
+    advance: OnboardingAdvance;
+  } | null;
 }
 
 // ─── Copy ───────────────────────────────────────────────────────────────────
@@ -117,6 +131,7 @@ export const COPY = {
     "Hi! This is Boba — conversation-first dating. We're invite-only right now. Reply JOIN if you have an invite code, or visit boba.app to request one.",
   onboardingStub:
     "Welcome to Boba! You're partway through onboarding. We'll text you the next question shortly.",
+  // Reserved for `OnboardingAdvance.reply` — kept here only for greppability.
   noMatchHolding:
     "You're all set. Your next match drops today at 5pm — we'll text you here.",
   paused:
@@ -154,6 +169,7 @@ export function route(input: RouteInput): RouteResult {
       ],
       persistInbound: null,
       milestonesToRecord: [],
+      onboardingAdvance: null,
     };
   }
 
@@ -163,13 +179,19 @@ export function route(input: RouteInput): RouteResult {
     case "BANNED":
       // Soft-fail silently — drop the message, no reply. Reporting still
       // tracks the user, but they don't get to participate.
-      return { outbounds: [], persistInbound: null, milestonesToRecord: [] };
+      return {
+        outbounds: [],
+        persistInbound: null,
+        milestonesToRecord: [],
+        onboardingAdvance: null,
+      };
 
     case "PAUSED":
       return {
         outbounds: [systemReply(user, COPY.paused, "paused")],
         persistInbound: null,
         milestonesToRecord: [],
+        onboardingAdvance: null,
       };
 
     case "ONBOARDING":
@@ -181,14 +203,17 @@ export function route(input: RouteInput): RouteResult {
 }
 
 /**
- * Onboarding seam. The full state machine ships in the next task; today
- * we just acknowledge so the user knows their message landed.
+ * Drive the onboarding state machine for one inbound. We delegate parsing
+ * + transition logic to `../onboarding/flow.ts` and emit a single system
+ * reply with the next prompt (or a clarifying retry on parse failure).
  */
-function routeOnboarding(user: RouterUser, _body: string): RouteResult {
+function routeOnboarding(user: RouterUser, body: string): RouteResult {
+  const adv = advanceOnboarding(user.onboardingStep, body);
   return {
-    outbounds: [systemReply(user, COPY.onboardingStub, "onboarding_stub")],
+    outbounds: [systemReply(user, adv.reply, "onboarding_stub")],
     persistInbound: null,
     milestonesToRecord: [],
+    onboardingAdvance: { userId: user.id, advance: adv },
   };
 }
 
@@ -202,6 +227,7 @@ function routeActive(
       outbounds: [systemReply(user, COPY.noMatchHolding, "no_match_holding")],
       persistInbound: null,
       milestonesToRecord: [],
+      onboardingAdvance: null,
     };
   }
 
@@ -279,6 +305,7 @@ function routeActive(
       depthScore,
     },
     milestonesToRecord,
+    onboardingAdvance: null,
   };
 }
 

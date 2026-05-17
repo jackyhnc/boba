@@ -75,6 +75,10 @@ model User {
   campusEmailDomain String?
   status            UserStatus @default(ONBOARDING)
 
+  // Onboarding flow cursor. NULL means "not started" (first inbound triggers
+  // the welcome). Transitions to NULL again once status flips to ACTIVE.
+  onboardingStep String?
+
   // AI seeding — disabled by default; plumbing only.
   isAiBacked      Boolean @default(false)
   aiPersonaPrompt String?
