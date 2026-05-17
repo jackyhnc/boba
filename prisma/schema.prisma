@@ -1,7 +1,19 @@
 // Boba — Prisma schema
-// The full domain model lands in the next overnight task ("Data model").
-// A single sentinel model is included here so `prisma generate` produces
-// a valid client and the rest of the codebase compiles.
+//
+// Domain model overview:
+//   User                ── one ── Preferences
+//                       └─ one ── Stats
+//                       └─ many ── DailyMatch (as A or B)
+//                       └─ many ── Message (sender)
+//                       └─ many ── EndOfDayDecision
+//   DailyMatch          ── many ── Message
+//                       └─ many ── MilestoneProgress
+//                       └─ many ── EndOfDayDecision
+//   RematchHistory      tracks repeat pairings across days
+//
+// All ids are cuids. Phone numbers are stored E.164.
+// User-pair tables (DailyMatch, RematchHistory) keep ids ordered
+// (userAId < userBId lexicographically) so uniqueness is well-defined.
 
 generator client {
   provider = "prisma-client-js"
@@ -12,9 +24,233 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Sentinel — will be replaced/extended in the data-model task.
-model SchemaMarker {
-  id        Int      @id @default(autoincrement())
-  version   String   @unique
+// ─── Enums ──────────────────────────────────────────────────────────────────
+
+enum UserStatus {
+  ONBOARDING
+  ACTIVE
+  PAUSED
+  BANNED
+}
+
+enum Gender {
+  WOMAN
+  MAN
+  NONBINARY
+  OTHER
+}
+
+enum MatchState {
+  ACTIVE // currently the live conversation for the day
+  AWAITING_DECISION // day complete, both users still owe an end-of-day decision
+  CONTINUED // both kept/maybe — conversation rolls into a new DailyMatch tomorrow
+  ENDED_BY_DISCARD
+  EXPIRED // day passed with no resolution
+}
+
+enum MilestoneType {
+  AGE
+  PROFESSION
+  HEIGHT
+  FACE
+}
+
+enum Decision {
+  KEEP
+  MAYBE
+  DISCARD
+}
+
+enum MessageDirection {
+  INBOUND // user → Boba
+  OUTBOUND // Boba → user (the relay)
+}
+
+// ─── Core models ────────────────────────────────────────────────────────────
+
+model User {
+  id                String     @id @default(cuid())
+  phone             String     @unique
+  displayName       String?
+  campusEmailDomain String?
+  status            UserStatus @default(ONBOARDING)
+
+  // AI seeding — disabled by default; plumbing only.
+  isAiBacked      Boolean @default(false)
+  aiPersonaPrompt String?
+
+  // Soft moderation
+  reportCount Int @default(0)
+
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  preferences     Preferences?
+  stats           Stats?
+  sentMessages    Message[]          @relation("MessageSender")
+  matchesAsA      DailyMatch[]       @relation("MatchUserA")
+  matchesAsB      DailyMatch[]       @relation("MatchUserB")
+  decisions       EndOfDayDecision[]
+  reportsFiled    Report[]           @relation("ReportReporter")
+  reportsReceived Report[]           @relation("ReportSubject")
+
+  @@index([status])
+}
+
+model Preferences {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  minAge               Int?
+  maxAge               Int?
+  preferredGenders     Gender[] @default([])
+  minHeightCm          Int?
+  maxHeightCm          Int?
+  preferredProfessions String[] @default([])
+
+  // Free-text "type" description used by future LLM-augmented scoring.
+  typeDescriptor String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Stats {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  age        Int?
+  gender     Gender?
+  profession String?
+  heightCm   Int?
+  photoUrl   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ─── Matching & conversation ────────────────────────────────────────────────
+
+model DailyMatch {
+  id String @id @default(cuid())
+
+  // userAId < userBId (lexicographic) — invariant enforced in app layer.
+  userAId String
+  userBId String
+  userA   User   @relation("MatchUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB   User   @relation("MatchUserB", fields: [userBId], references: [id], onDelete: Cascade)
+
+  matchDate          DateTime   @db.Date
+  state              MatchState @default(ACTIVE)
+  compatibilityScore Float      @default(0)
+
+  // When the previous day's match continued into this one.
+  parentMatchId String?     @unique
+  parent        DailyMatch? @relation("MatchContinuation", fields: [parentMatchId], references: [id], onDelete: SetNull)
+  child         DailyMatch? @relation("MatchContinuation")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages   Message[]
+  milestones MilestoneProgress[]
+  decisions  EndOfDayDecision[]
+
+  // One match per ordered pair per day.
+  @@unique([userAId, userBId, matchDate])
+  @@index([matchDate])
+  @@index([state])
+}
+
+model Message {
+  id      String     @id @default(cuid())
+  matchId String
+  match   DailyMatch @relation(fields: [matchId], references: [id], onDelete: Cascade)
+
+  senderId String
+  sender   User   @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+
+  direction MessageDirection
+  body      String
+
+  // Twilio's message SID — unique when present. Outbound has it post-send;
+  // inbound has it on receipt. Nullable to allow pre-persist for outbound queueing.
+  twilioSid String? @unique
+
+  // Heuristic 0..1 score: length + question-mark + reciprocity signals.
+  depthScore Float @default(0)
+
+  // Anti-doxx / moderation flags. Surfaced for milestone gating.
+  flaggedStatFishing Boolean @default(false)
+  flaggedHarassment  Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([matchId, createdAt])
+  @@index([senderId])
+}
+
+// ─── Reveal milestones ──────────────────────────────────────────────────────
+
+// One row per match per milestone — a milestone unlocks for the pair, not per-user.
+model MilestoneProgress {
+  id         String        @id @default(cuid())
+  matchId    String
+  match      DailyMatch    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  milestone  MilestoneType
+  unlockedAt DateTime      @default(now())
+
+  @@unique([matchId, milestone])
+  @@index([matchId])
+}
+
+// ─── End-of-day decisions ───────────────────────────────────────────────────
+
+model EndOfDayDecision {
+  id        String     @id @default(cuid())
+  matchId   String
+  match     DailyMatch @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  decision  Decision
+  decidedAt DateTime   @default(now())
+
+  @@unique([matchId, userId])
+  @@index([matchId])
+}
+
+// ─── Rematch history (across days) ──────────────────────────────────────────
+
+// Tracks any pair that has ever been matched; informs rematch cooldowns &
+// surfacing logic. userAId < userBId invariant.
+model RematchHistory {
+  id             String   @id @default(cuid())
+  userAId        String
+  userBId        String
+  firstMatchedAt DateTime @default(now())
+  lastMatchedAt  DateTime @default(now())
+  matchCount     Int      @default(1)
+  // True once the pair ever produced a Discard from either side.
+  hasDiscard     Boolean  @default(false)
+
+  @@unique([userAId, userBId])
+  @@index([lastMatchedAt])
+}
+
+// ─── Moderation: reports ────────────────────────────────────────────────────
+
+model Report {
+  id         String   @id @default(cuid())
+  reporterId String
+  reporter   User     @relation("ReportReporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  subjectId  String
+  subject    User     @relation("ReportSubject", fields: [subjectId], references: [id], onDelete: Cascade)
+  reason     String
+  details    String?
+  createdAt  DateTime @default(now())
+
+  @@index([subjectId])
+  @@index([reporterId])
 }
