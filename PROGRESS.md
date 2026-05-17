@@ -689,3 +689,24 @@ expanded the Twilio-console section so they have a clear checklist.
 
 **Next agent: pick this up**
 - Daily-match scheduler (in-process cron + manual admin trigger), then admin endpoints (list users / view conversation / ban) gated by `ADMIN_TOKEN`.
+
+---
+
+## 2026-05-17T19:38Z — Daily-match scheduler
+
+**Shipped**
+- `src/scheduler/runDailyMatch.ts` — one-shot runner that loads context, picks pairs, persists, and notifies both users via SMS. Returns `{candidates, selected, createdMatchIds, notified, notifyErrors}`. Re-runnable safely (matchedToday dedupe is handled by the existing selector).
+- `src/scheduler/cron.ts` — `node-cron` wrapper. Validates expression, exposes `triggerNow()` for the admin endpoint, swallows runner errors so a single failed tick doesn't crash the loop.
+- `src/app.ts` — boots the scheduler when `SCHEDULER_ENABLED=true` and always decorates `app.runDailyMatch` so the admin endpoint can fire it on demand. Auto-stops on `onClose`.
+- Added `node-cron` dependency.
+- `DEFAULT_NEW_MATCH_NOTIFICATION`: "Your match for today is here 🧋…"
+
+**Tests**
+- `tests/scheduler/runDailyMatch.test.ts`: zero-candidates, a normal pairing with both-side notification, partial notify failure, custom body.
+- `tests/scheduler/cron.test.ts`: invalid expression rejected, triggerNow works, stop is safe.
+
+**Verified**
+- Typecheck, test (237/237), build, lint clean.
+
+**Next agent: pick this up**
+- Admin endpoints (`/admin/users`, `/admin/match/:id`, `/admin/users/:id/ban`, `/admin/run-daily-match`) gated by `ADMIN_TOKEN`.
