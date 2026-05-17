@@ -13,7 +13,11 @@
 // we emit a friendly holding reply for ONBOARDING users; the seam is
 // `routeOnboarding`, which the next agent will fill in.
 
-import type { MessageDirection, MilestoneType, UserStatus } from "@prisma/client";
+import type { Decision, MessageDirection, MilestoneType, UserStatus } from "@prisma/client";
+import {
+  parseDecisionKeyword,
+  replyForOwnDecision,
+} from "../decisions/flow.js";
 import { scoreMessageDepth, type DepthInput } from "../milestones/depth.js";
 import {
   nextMilestoneToUnlock,
@@ -95,7 +99,9 @@ export interface OutboundAction {
     | "paused"
     | "banned_silent"
     | "relay"
-    | "milestone_reveal";
+    | "milestone_reveal"
+    | "decision_ack"
+    | "decision_announcement";
 }
 
 /** Directive for persisting the inbound `Message` row, if applicable. */
@@ -120,6 +126,19 @@ export interface RouteResult {
   onboardingAdvance: {
     userId: string;
     advance: OnboardingAdvance;
+  } | null;
+  /**
+   * When set, the caller should record this end-of-day decision and (if
+   * the partner has already decided) emit a resolution announcement to
+   * both users via the recorded continuation result.
+   */
+  decisionToRecord: {
+    matchId: string;
+    userId: string;
+    /** Partner's phone — used for the announcement outbound. */
+    partnerPhone: string;
+    partnerUserId: string;
+    decision: Decision;
   } | null;
 }
 
@@ -170,6 +189,7 @@ export function route(input: RouteInput): RouteResult {
       persistInbound: null,
       milestonesToRecord: [],
       onboardingAdvance: null,
+      decisionToRecord: null,
     };
   }
 
@@ -184,6 +204,7 @@ export function route(input: RouteInput): RouteResult {
         persistInbound: null,
         milestonesToRecord: [],
         onboardingAdvance: null,
+        decisionToRecord: null,
       };
 
     case "PAUSED":
@@ -192,6 +213,7 @@ export function route(input: RouteInput): RouteResult {
         persistInbound: null,
         milestonesToRecord: [],
         onboardingAdvance: null,
+        decisionToRecord: null,
       };
 
     case "ONBOARDING":
@@ -214,6 +236,7 @@ function routeOnboarding(user: RouterUser, body: string): RouteResult {
     persistInbound: null,
     milestonesToRecord: [],
     onboardingAdvance: { userId: user.id, advance: adv },
+    decisionToRecord: null,
   };
 }
 
@@ -228,6 +251,38 @@ function routeActive(
       persistInbound: null,
       milestonesToRecord: [],
       onboardingAdvance: null,
+      decisionToRecord: null,
+    };
+  }
+
+  // End-of-day decision keyword? Intercept BEFORE we treat the message
+  // as conversational. We accept these whenever a match exists — the
+  // PRD doesn't require the day to be "over"; a user who wants out
+  // can short-circuit. The IO layer enforces idempotency.
+  const decisionKeyword = parseDecisionKeyword(body);
+  if (decisionKeyword) {
+    return {
+      outbounds: [
+        {
+          toPhone: user.phone,
+          toUserId: user.id,
+          fromUserId: null,
+          body: replyForOwnDecision(decisionKeyword),
+          isRelay: false,
+          matchId: active.id,
+          kind: "decision_ack",
+        },
+      ],
+      persistInbound: null,
+      milestonesToRecord: [],
+      onboardingAdvance: null,
+      decisionToRecord: {
+        matchId: active.id,
+        userId: user.id,
+        partnerPhone: active.partner.phone,
+        partnerUserId: active.partner.id,
+        decision: decisionKeyword,
+      },
     };
   }
 
@@ -306,6 +361,7 @@ function routeActive(
     },
     milestonesToRecord,
     onboardingAdvance: null,
+    decisionToRecord: null,
   };
 }
 

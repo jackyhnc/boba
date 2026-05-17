@@ -20,6 +20,10 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { loadEnv } from "../config/env.js";
 import { prisma } from "../lib/prisma.js";
 import { createTwilioClient, type TwilioClient } from "./client.js";
+import {
+  recordDecisionAndMaybeResolve,
+  resolutionAnnouncement,
+} from "../decisions/index.js";
 import { persistOnboardingUpdates } from "../onboarding/prisma-deps.js";
 import { route, renderRevealBody, type OutboundAction } from "./conversation.js";
 import {
@@ -123,6 +127,48 @@ export async function registerTwilioRoutes(
         advance.nextStep,
         advance.markActive,
       );
+    }
+
+    // End-of-day decision (if any). We persist + maybe resolve, then
+    // emit an announcement outbound to both users once resolution is
+    // known. The decision_ack outbound to the deciding user was emitted
+    // by the router; we still need to send the announcement.
+    if (result.decisionToRecord) {
+      const today = new Date();
+      const { resolution } = await recordDecisionAndMaybeResolve(db, {
+        matchId: result.decisionToRecord.matchId,
+        userId: result.decisionToRecord.userId,
+        decision: result.decisionToRecord.decision,
+        today,
+      });
+
+      // Only emit a partner-facing announcement when resolved or when
+      // the partner hasn't yet decided (nudge them).
+      const announcement = resolutionAnnouncement(resolution.outcome);
+      // The deciding user gets the announcement only when resolution is
+      // final (continued or ended); partner always gets the message.
+      const partnerAction: OutboundAction = {
+        toPhone: result.decisionToRecord.partnerPhone,
+        toUserId: result.decisionToRecord.partnerUserId,
+        fromUserId: null,
+        body: announcement,
+        isRelay: false,
+        matchId: result.decisionToRecord.matchId,
+        kind: "decision_announcement",
+      };
+      result.outbounds.push(partnerAction);
+
+      if (resolution.outcome !== "pending") {
+        result.outbounds.push({
+          toPhone: sender!.phone,
+          toUserId: sender!.id,
+          fromUserId: null,
+          body: announcement,
+          isRelay: false,
+          matchId: result.decisionToRecord.matchId,
+          kind: "decision_announcement",
+        });
+      }
     }
 
     // Record milestones BEFORE sending the reveal SMS so the unlock is

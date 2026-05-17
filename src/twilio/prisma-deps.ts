@@ -13,7 +13,15 @@ import type { RouterActiveMatch, RouterUser } from "./conversation.js";
 
 export type TwilioPrisma = Pick<
   PrismaClient,
-  "user" | "dailyMatch" | "message" | "milestoneProgress" | "stats" | "preferences"
+  | "user"
+  | "dailyMatch"
+  | "message"
+  | "milestoneProgress"
+  | "stats"
+  | "preferences"
+  | "endOfDayDecision"
+  | "rematchHistory"
+  | "$transaction"
 >;
 
 /**

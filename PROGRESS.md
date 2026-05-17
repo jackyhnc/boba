@@ -512,3 +512,29 @@ expanded the Twilio-console section so they have a clear checklist.
 
 **Next agent: pick this up**
 - Task: **End-of-day Keep/Maybe/Discard flow + resolution logic**.
+
+---
+
+## 2026-05-17T12:15Z — End-of-day Keep/Maybe/Discard
+
+**Shipped**
+- `src/decisions/` — pure parser + resolver + Prisma adapter.
+  - `parseDecisionKeyword`: matches `KEEP|K|MAYBE|M|DISCARD|D|PASS|NOPE` as exact tokens (multi-word messages stay as chat).
+  - `resolve(a, b)`: any DISCARD → ended_by_discard; both decided otherwise → continue; else pending.
+  - `recordDecisionAndMaybeResolve`: idempotent upsert, flips state ACTIVE→AWAITING_DECISION on first decision; on resolution flips to CONTINUED (FACE milestone unlocked, tomorrow's DailyMatch created with parentMatchId, RematchHistory incremented) or ENDED_BY_DISCARD (RematchHistory.hasDiscard = true). All in a single transaction.
+- Router intercept: a decision keyword in an ACTIVE match short-circuits the relay path, emits `decision_ack` to the deciding user and returns a `decisionToRecord` directive.
+- Route handler: applies the directive, emits `decision_announcement` to the partner (pending nudge or resolution) and — when final — to the deciding user too.
+- New OutboundAction kinds: `decision_ack`, `decision_announcement`.
+- `TwilioPrisma` extended with `endOfDayDecision`, `rematchHistory`, `$transaction`.
+
+**Tests**
+- `tests/decisions/flow.test.ts` (12 cases): keyword parsing edge cases + full resolution truth table.
+- `tests/decisions/record.test.ts` (5 cases): in-memory Prisma double exercising KEEP+KEEP → continue + FACE + next-day match + rematch; DISCARD → ended + rematch.hasDiscard; MAYBE+MAYBE continue; idempotent overwrite.
+- `tests/twilio/routes.test.ts`: new DISCARD-keyword route test verifies 3 outbounds (ack + both announcements) and state transition.
+
+**Verified**
+- `npm run typecheck`, `npm run build`, `npm run lint` clean.
+- `npm test` — 152/152 pass (was 137).
+
+**Next agent: pick this up**
+- Task: **Rematch eligibility logic** — query helper that, given a candidate pair and today's date, returns whether they may be rematched. Honors RematchHistory.hasDiscard (never), respects a cooldown window (e.g. 14 days), and excludes pairs already matched today. Use from the matching selector.

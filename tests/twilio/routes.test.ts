@@ -115,6 +115,38 @@ function makeFakeDb(): {
           milestones: m.milestones.map((mi) => ({ milestone: mi.milestone })),
         };
       },
+      findUnique: async ({ where }: { where: { id: string } }) => {
+        const m = matches.find((mm) => mm.id === where.id);
+        if (!m) return null;
+        const decisions = (m as unknown as { decisions?: Array<{ userId: string; decision: string }> }).decisions ?? [];
+        return {
+          id: m.id,
+          userAId: m.userAId,
+          userBId: m.userBId,
+          matchDate: m.matchDate,
+          state: m.state,
+          compatibilityScore: 0.5,
+          decisions: [...decisions],
+        };
+      },
+      update: async ({ where, data }: { where: { id: string }; data: { state?: FakeMatch["state"] } }) => {
+        const m = matches.find((mm) => mm.id === where.id);
+        if (m && data.state) m.state = data.state;
+        return m as never;
+      },
+      create: async ({ data }: { data: { userAId: string; userBId: string; matchDate: Date; state: FakeMatch["state"]; compatibilityScore: number; parentMatchId?: string | null } }) => {
+        const id = `m_new_${matches.length + 1}`;
+        matches.push({
+          id,
+          userAId: data.userAId,
+          userBId: data.userBId,
+          state: data.state,
+          matchDate: data.matchDate,
+          messages: [],
+          milestones: [],
+        });
+        return { id };
+      },
     },
     message: {
       create: async ({ data }: { data: { matchId: string; senderId: string; direction: string; body: string; depthScore?: number; twilioSid: string | null } }) => {
@@ -145,6 +177,24 @@ function makeFakeDb(): {
       },
       findMany: async () => [],
     },
+    endOfDayDecision: {
+      upsert: async ({ where, create }: { where: { matchId_userId: { matchId: string; userId: string } }; create: { decision: string } }) => {
+        // We piggyback on the existing match's `decisions` array (added below).
+        const m = matches.find((mm) => mm.id === where.matchId_userId.matchId);
+        if (m) {
+          const dec = (m as unknown as { decisions?: Array<{ userId: string; decision: string }> }).decisions ?? [];
+          const idx = dec.findIndex((d) => d.userId === where.matchId_userId.userId);
+          if (idx >= 0) dec[idx]!.decision = create.decision;
+          else dec.push({ userId: where.matchId_userId.userId, decision: create.decision });
+          (m as unknown as { decisions: typeof dec }).decisions = dec;
+        }
+        return {};
+      },
+    },
+    rematchHistory: {
+      upsert: async () => ({}),
+    },
+    $transaction: async <T,>(fn: (tx: unknown) => Promise<T>) => fn(db),
   } as unknown as TwilioPrisma;
 
   return { db, users, matches, insertedMessages, upsertedMilestones };
@@ -254,6 +304,44 @@ describe("POST /webhooks/twilio/inbound", () => {
       direction: "OUTBOUND",
     });
     expect(upsertedMilestones).toEqual([]);
+    await app.close();
+  });
+
+  it("DISCARD keyword ends the match and emits announcements to both users", async () => {
+    const { db, users, matches } = makeFakeDb();
+    users.push(
+      { id: "u_alice", phone: "+15550000001", displayName: "Alice", status: "ACTIVE", onboardingStep: null },
+      { id: "u_bob", phone: "+15550000002", displayName: "Bob", status: "ACTIVE", onboardingStep: null },
+    );
+    matches.push({
+      id: "m_today",
+      userAId: "u_alice",
+      userBId: "u_bob",
+      state: "ACTIVE",
+      matchDate: new Date(),
+      messages: [],
+      milestones: [],
+    });
+
+    const { client, calls } = makeFakeTwilio();
+    const app = await buildApp({ twilio: { deps: { prisma: db, twilio: client } } });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/webhooks/twilio/inbound",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams({
+        From: "+15550000001",
+        Body: "DISCARD",
+        MessageSid: "SM" + "d".repeat(32),
+      }).toString(),
+    });
+    expect(res.statusCode).toBe(200);
+    // 1 ack to alice + 1 announcement to bob + 1 final announcement to alice.
+    expect(calls).toHaveLength(3);
+    const recipients = calls.map((c) => c.to).sort();
+    expect(recipients).toEqual(["+15550000001", "+15550000001", "+15550000002"]);
+    expect(matches[0]!.state).toBe("ENDED_BY_DISCARD");
     await app.close();
   });
 
