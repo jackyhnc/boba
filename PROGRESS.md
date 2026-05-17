@@ -4,6 +4,100 @@ Reverse-chronological. Newest entries on top. Each entry: timestamp, what shippe
 
 ---
 
+## 2026-05-17 — Run 3: matching algorithm v1
+
+**Shipped**
+- `src/matching/` module with a clean pure-vs-IO split:
+  - `types.ts` — `CandidateProfile`, `CompatibilityScore`,
+    `SelectorContext`, `SelectorConfig`, `SelectedMatch`,
+    `PairHistoryEntry`, plus `DEFAULT_SELECTOR_CONFIG`
+    (`rematchCooldownDays: 14`, `minScore: 0.3`).
+  - `scoring.ts` — `scoreCompatibility(a, b)`. Pure. Hard gates: self-pair,
+    mutual gender preference. Soft signals weighted: age 0.25, height 0.2,
+    profession 0.2, typeDescriptor 0.35. Age/height fall off linearly within
+    a ±3yr / ±10cm tolerance window. typeDescriptor uses a tokenised
+    Jaccard overlap with a small stopword list — TODO seam left for the
+    eventual LLM-scored variant.
+  - `selector.ts` — `selectDailyMatches(today, ctx, config?)`. Iterates all
+    unordered pairs, drops the ones already matched today / in cooldown /
+    permanently blocked by a prior Discard / under `minScore`, sorts by
+    score desc (deterministic tiebreaker on pair ids), then greedy
+    max-weight matching (claim users as we go). Greedy chosen over
+    Blossom for v1; documented inline. Also exports `pairKey`,
+    `toDateKey`, `dayDiff` helpers.
+  - `prisma-deps.ts` — `loadSelectorContext(prisma, today)` + 
+    `persistDailyMatches(prisma, pairs, today)`. Both are typed against a
+    narrow `MatchingPrisma` surface so tests can mock without pulling
+    the full PrismaClient. Persist runs under
+    `Prisma.TransactionIsolationLevel.Serializable` and upserts
+    `RematchHistory` (creating with `matchCount=1` or
+    `{ increment: 1 }`). Defensive re-ordering via `orderPair` even if a
+    caller passes a non-canonical pair.
+  - `index.ts` barrel exports.
+- Tests (`tests/matching/`):
+  - `scoring.test.ts` (15 tests) — every hard gate, every soft signal
+    (in-range, soft penalty, out-of-tolerance, missing-data neutral),
+    plus a "good pair scores meaningfully higher than a bad pair"
+    end-to-end check with realistic profiles.
+  - `selector.test.ts` (13 tests) — empty / single-candidate, single
+    match, greedy ordering picks the highest-overlap pair first, no
+    user is double-matched, today-already-matched exclusion, permanent
+    Discard exclusion, cooldown window enforced, `minScore` honoured,
+    gender-preference hard gate is honoured end-to-end, canonical
+    A<B pair ordering, plus unit tests for `toDateKey` / `dayDiff` /
+    `pairKey` helpers.
+  - `persist.test.ts` (3 tests) — empty input short-circuits the
+    transaction, paired writes happen inside a single `$transaction`
+    with one `dailyMatch.create` + one `rematchHistory.upsert` per
+    pair, `matchDate` is normalised to UTC midnight, non-canonical
+    input is re-ordered before write. Uses a hand-rolled
+    `MatchingPrisma` mock — no live DB required.
+
+**Verified**
+- `npm run build` — clean.
+- `npm test` — 43/43 pass (up from 12/12).
+- `npm run lint` — clean.
+- `prisma format` + `prisma validate` — clean (schema untouched).
+
+**Didn't try / deferred**
+- Did not exercise `persistDailyMatches` against a real Postgres — no
+  Docker available in this sandbox (`prisma migrate dev` blocked
+  too). The unit-test mock covers the call shape; the next agent (or
+  the user, locally) should be able to run it end-to-end once
+  `db:up` works.
+- Did not run `npm run typecheck`. Pre-existing config issue: root
+  `tsconfig.json` has `rootDir: src` while `include` also covers
+  `tests/`, so `tsc --noEmit` complains. The build path
+  (`tsconfig.build.json`) excludes tests and works fine, and vitest
+  type-checks tests at run time. Worth fixing in a small follow-up
+  (e.g. drop `rootDir`, or split tests into their own tsconfig).
+
+**Blocked on user** — nothing new. `USER_TODO.md` is still accurate.
+
+**Next agent: pick this up**
+- Task: **Milestone system**. Build `src/milestones/`:
+  - `depth.ts`: pure scoring of a single message (length bucket,
+    question-mark ratio, reciprocity vs. previous messages → 0..1
+    `depthScore`). Wire this in so callers can pre-fill
+    `Message.depthScore` before insert.
+  - `unlock.ts`: pure rule that takes the current conversation
+    (messages + already-unlocked milestones) and returns the next
+    `MilestoneType` to unlock, if any. Suggested thresholds:
+      - AGE: >=10 mutual messages with avg depthScore >= 0.3
+      - PROFESSION: >=25 mutual messages with avg depthScore >= 0.4
+      - HEIGHT: >=50 mutual messages with avg depthScore >= 0.5
+      - FACE: only via end-of-day resolution, not here
+    Both halves of the pair must contribute — gate on min messages
+    per side. Document the numbers as tunable.
+  - `prisma-deps.ts`: `recordMilestone(prisma, matchId, milestone)`
+    inserting the `MilestoneProgress` row (idempotent via the
+    `@@unique([matchId, milestone])`).
+  - Tests for both pure functions in `tests/milestones/`.
+- After that: iMessage relay layer is the next-biggest unblock.
+- Update `GOAL.md` (check off) + `PROGRESS.md`.
+
+---
+
 ## 2026-05-17 — Run 2: data model
 
 **Shipped**
