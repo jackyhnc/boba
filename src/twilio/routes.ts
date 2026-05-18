@@ -33,13 +33,16 @@ import {
 } from "../safety/prisma-deps.js";
 import { route, renderRevealBody, type OutboundAction } from "./conversation.js";
 import {
+  applySmsOptOutChange,
   findUserByPhone,
+  isSmsOptedOut,
   loadActiveMatchForUser,
   persistInboundMessage,
   persistOutboundMessage,
   recordDeliveryStatus,
   type TwilioPrisma,
 } from "./prisma-deps.js";
+import { detectSmsKeyword } from "../safety/smsKeywords.js";
 import { verifyTwilioSignature } from "./signature.js";
 
 const EMPTY_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>';
@@ -113,25 +116,35 @@ export async function registerTwilioRoutes(
 
     // Auto-provision a fresh ONBOARDING user the first time we hear from
     // an unknown phone — they enter the invite-code step on the next reply.
+    //
+    // Exception: don't create an account on an inbound STOP/HELP from a
+    // stranger. STOP from a non-account is meaningless; HELP just needs
+    // a compliance reply. This keeps the user table clean of one-off
+    // wrong-number STOPs (which are surprisingly common in SMS apps).
     let sender = await findUserByPhone(db, from);
     if (!sender) {
-      const created = await db.user.create({
-        data: { phone: from, status: "ONBOARDING" },
-        select: {
-          id: true,
-          phone: true,
-          displayName: true,
-          status: true,
-          onboardingStep: true,
-        },
-      });
-      sender = {
-        id: created.id,
-        phone: created.phone,
-        displayName: created.displayName,
-        status: created.status,
-        onboardingStep: null,
-      };
+      const kw = detectSmsKeyword(body).keyword;
+      if (kw !== "STOP" && kw !== "HELP") {
+        const created = await db.user.create({
+          data: { phone: from, status: "ONBOARDING" },
+          select: {
+            id: true,
+            phone: true,
+            displayName: true,
+            status: true,
+            onboardingStep: true,
+            smsOptedOut: true,
+          },
+        });
+        sender = {
+          id: created.id,
+          phone: created.phone,
+          displayName: created.displayName,
+          status: created.status,
+          onboardingStep: null,
+          smsOptedOut: created.smsOptedOut,
+        };
+      }
     }
     const activeMatch = sender ? await loadActiveMatchForUser(db, sender.id) : null;
 
@@ -143,6 +156,26 @@ export async function registerTwilioRoutes(
       media,
       onboardingConfig: { invitesRequired: env.INVITES_REQUIRED },
     });
+
+    // Carrier-compliance state change (STOP / START). Apply BEFORE we
+    // send the ack so a race that re-reads the flag (e.g. scheduler
+    // tick) sees the new value. STOP_ACK / START_ACK are always
+    // deliverable — they're the legally-required reply.
+    if (result.smsOptOutChange) {
+      await applySmsOptOutChange(
+        db,
+        result.smsOptOutChange.userId,
+        result.smsOptOutChange.optedOut,
+      );
+      app.log.info(
+        {
+          userId: result.smsOptOutChange.userId,
+          optedOut: result.smsOptOutChange.optedOut,
+          keyword: result.smsOptOutChange.keyword,
+        },
+        "twilio.compliance: sms opt-out flag updated",
+      );
+    }
 
     // Persist the inbound message first so we have the row id before we
     // start emitting outbounds (matters if downstream callers want to
@@ -344,6 +377,21 @@ export async function registerTwilioRoutes(
           ? await materialiseRevealBody(db, action, sender, activeMatch)
           : action.body;
 
+      // Carrier-compliance guard: skip any outbound to a user who has
+      // texted STOP. The STOP_ACK / HELP_REPLY / START_ACK outbounds
+      // themselves are always deliverable (this is the legally-required
+      // reply and STOP_ACK is sent to a just-opted-out user).
+      if (!isComplianceReply(action.kind) && action.toUserId) {
+        const blocked = await isSmsOptedOut(db, action.toUserId);
+        if (blocked) {
+          app.log.info(
+            { toUserId: action.toUserId, kind: action.kind },
+            "twilio.outbound suppressed: recipient is opted out",
+          );
+          continue;
+        }
+      }
+
       let sid: string | null = null;
       try {
         const sent = await twilio.sendSms({ to: action.toPhone, body: finalBody });
@@ -396,6 +444,18 @@ export async function registerTwilioRoutes(
     }
     return reply.code(204).send();
   });
+}
+
+/**
+ * The three compliance-reply kinds are always deliverable, regardless
+ * of the recipient's opt-out state. STOP_ACK in particular is sent to a
+ * user we just marked as opted-out (one final confirmation message is
+ * allowed by carriers and required by CTIA guidance).
+ */
+function isComplianceReply(kind: OutboundAction["kind"]): boolean {
+  return (
+    kind === "sms_stop_ack" || kind === "sms_help_reply" || kind === "sms_start_ack"
+  );
 }
 
 function inviteFailureReply(

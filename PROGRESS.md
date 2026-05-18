@@ -762,3 +762,88 @@ expanded the Twilio-console section so they have a clear checklist.
 - typecheck, test (256/256), build, lint all clean.
 
 **Done.** All 8 phase-2 launch items are checked off. `USER_TODO.md` is the only thing left for the human.
+
+---
+
+## 2026-05-18T08:25Z — SMS carrier compliance (STOP / HELP / START)
+
+**Why this wasn't `BUILD_COMPLETE` yet**
+- A prior agent set `BUILD_COMPLETE` after the 13-item main list, then phase-2
+  expanded the checklist; the marker was never re-written. More importantly,
+  there was a real launch-blocking gap: **CTIA / 10DLC requires every A2P SMS
+  program to honor STOP, HELP, and START.** Without it US carriers reject the
+  campaign (or silently filter the traffic) and Twilio's 10DLC submission
+  itself asks you to file sample STOP/HELP replies. That was load-bearing for
+  the "launch-ready" claim and now it's done.
+
+**Shipped**
+- `src/safety/smsKeywords.ts` (pure):
+  - `detectSmsKeyword(body)` — recognises STOP / STOPALL / UNSUBSCRIBE /
+    CANCEL / END / QUIT / OPTOUT / OPT-OUT; HELP / INFO; START / UNSTOP / YES.
+    First-token-only matching with tolerant trailing-punctuation (`STOP.`,
+    `stop!`, etc.). Returns `{keyword, token}`.
+  - `STOP_ACK`, `HELP_REPLY`, `START_ACK` — compliance reply copy. `HELP_REPLY`
+    bakes in "Msg & data rates may apply", program name, opt-out instructions
+    + a support-email placeholder.
+- Schema: new `User.smsOptedOut Boolean @default(false)` + `smsOptedOutAt
+  DateTime?` columns; `@@index([smsOptedOut])`; migration committed at
+  `prisma/migrations/20260518080000_sms_opt_out/migration.sql`.
+- `RouterUser` gains a `smsOptedOut: boolean` field.
+- New `OutboundAction.kind` values: `sms_stop_ack | sms_help_reply |
+  sms_start_ack`.
+- New `RouteResult.smsOptOutChange: { userId, optedOut, keyword } | null`
+  directive.
+- `src/twilio/conversation.ts`:
+  - Compliance keywords are evaluated **before** every other path — including
+    BANNED, PAUSED, ONBOARDING, and unknown-sender. STOP from a banned user
+    still confirms (legal requirement); HELP from a stranger still gets the
+    program-info reply.
+  - Already-opted-out senders texting non-keyword bodies are dropped silently
+    (no relay, no persist, no system reply).
+  - Refactored the 7 sites that previously hand-built `RouteResult` literals
+    into `{ ...emptyResult(), <overrides> }` so the new field can never be
+    accidentally omitted.
+- `src/twilio/prisma-deps.ts`:
+  - `findUserByPhone` selects `smsOptedOut`.
+  - `applySmsOptOutChange(prisma, userId, optedOut)` — sets the flag +
+    timestamp (or clears both on opt-in).
+  - `isSmsOptedOut(prisma, userId)` — narrow read for the send-loop guard.
+- `src/twilio/routes.ts`:
+  - Applies the `smsOptOutChange` directive BEFORE sending the ack so any
+    racing read sees the new value.
+  - Auto-provision step now skips account creation when the inbound is a
+    STOP or HELP from an unknown phone — wrong-number STOPs no longer
+    pollute the user table.
+  - Outbound send loop: belt-and-brace guard that skips any non-compliance
+    outbound when the recipient is opted out. The three compliance acks
+    themselves are always sent (STOP_ACK is sent to a user we *just*
+    marked as opted-out — a single confirmation is allowed and required).
+- `src/matching/prisma-deps.ts`: `loadSelectorContext` now filters
+  `smsOptedOut: false` so the scheduler can't pick an opted-out user as a
+  match candidate.
+- `USER_TODO.md`: new bullets explaining the A2P sample-message filing +
+  the "Advanced Opt-Out" Twilio toggle interaction.
+
+**Tests**
+- `tests/safety/smsKeywords.test.ts` (22 cases): every STOP token, casing,
+  trailing-punct, first-token-only rule, every HELP token, every START
+  token, normal-conversation bodies are NOT keywords, compliance-copy
+  invariants.
+- `tests/twilio/conversation.test.ts` (11 new cases): STOP from ACTIVE,
+  STOP overrides an active match (no relay/persist), STOP from ONBOARDING,
+  STOP from BANNED still acks, STOP from unknown sender (ack but no
+  directive), HELP variants, START opt-in flow, opted-out user texting
+  random text is dropped, START from opted-out user works, compliance
+  keyword beats REPORT/decision parsing.
+- `tests/twilio/routes.test.ts` (4 new cases): STOP flips `smsOptedOut`
+  via Prisma + only the compliance ack is sent; a match relay where the
+  partner has opted out delivers ZERO outbounds; HELP from an unknown
+  number doesn't auto-provision; START from an opted-out user re-enables
+  sending.
+
+**Verified**
+- `npm run typecheck`, `npm test` (293/293), `npm run build`, `npm run lint`
+  all clean. +37 tests overall.
+
+**Done — really this time.** GOAL.md is fully checked off. `BUILD_COMPLETE`
+written. The next agent run can exit immediately.

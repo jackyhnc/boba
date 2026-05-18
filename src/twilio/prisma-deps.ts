@@ -42,6 +42,7 @@ export async function findUserByPhone(
       displayName: true,
       status: true,
       onboardingStep: true,
+      smsOptedOut: true,
     },
   });
   if (!user) return null;
@@ -49,6 +50,40 @@ export async function findUserByPhone(
     ...user,
     onboardingStep: user.onboardingStep as RouterUser["onboardingStep"],
   };
+}
+
+/**
+ * Toggle the carrier-required SMS opt-out flag. Idempotent — re-applying
+ * the same state is a no-op (we still update `smsOptedOutAt` on a STOP
+ * so we have an audit timestamp). Returns the user id so callers can
+ * log the change.
+ */
+export async function applySmsOptOutChange(
+  prisma: TwilioPrisma,
+  userId: string,
+  optedOut: boolean,
+): Promise<{ id: string }> {
+  const data = optedOut
+    ? { smsOptedOut: true, smsOptedOutAt: new Date() }
+    : { smsOptedOut: false, smsOptedOutAt: null };
+  await prisma.user.update({ where: { id: userId }, data });
+  return { id: userId };
+}
+
+/**
+ * Read the opt-out flag for a recipient. Used by the outbound send loop
+ * (and by the scheduler) to belt-and-brace against sending to opted-out
+ * users — Twilio also enforces this, but we shouldn't rely on it.
+ */
+export async function isSmsOptedOut(
+  prisma: TwilioPrisma,
+  userId: string,
+): Promise<boolean> {
+  const row = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { smsOptedOut: true },
+  });
+  return row?.smsOptedOut ?? false;
 }
 
 /**

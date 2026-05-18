@@ -17,6 +17,7 @@ interface FakeUser {
   displayName: string | null;
   status: "ACTIVE" | "ONBOARDING" | "PAUSED" | "BANNED";
   onboardingStep: string | null;
+  smsOptedOut?: boolean;
   stats?: { age: number | null; profession: string | null; heightCm: number | null };
 }
 
@@ -53,7 +54,7 @@ function makeFakeDb(): {
 
   const db = {
     user: {
-      findUnique: async ({ where, select }: { where: { phone?: string; id?: string }; select?: { stats?: unknown } }) => {
+      findUnique: async ({ where, select }: { where: { phone?: string; id?: string }; select?: { stats?: unknown; smsOptedOut?: boolean } }) => {
         const u = users.find(
           (x) => (where.phone && x.phone === where.phone) || (where.id && x.id === where.id),
         );
@@ -61,12 +62,17 @@ function makeFakeDb(): {
         if (select?.stats) {
           return { stats: u.stats ?? null };
         }
+        // Narrow select for the `isSmsOptedOut` helper.
+        if (select && Object.keys(select).length === 1 && select.smsOptedOut) {
+          return { smsOptedOut: u.smsOptedOut ?? false };
+        }
         return {
           id: u.id,
           phone: u.phone,
           displayName: u.displayName,
           status: u.status,
           onboardingStep: u.onboardingStep,
+          smsOptedOut: u.smsOptedOut ?? false,
         };
       },
       update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
@@ -90,6 +96,7 @@ function makeFakeDb(): {
           displayName: null,
           status: data.status,
           onboardingStep: null,
+          smsOptedOut: false,
         };
         users.push(u);
         return {
@@ -98,6 +105,7 @@ function makeFakeDb(): {
           displayName: null,
           status: u.status,
           onboardingStep: null,
+          smsOptedOut: false,
         };
       },
     },
@@ -600,6 +608,145 @@ describe("POST /webhooks/twilio/inbound", () => {
       payload: new URLSearchParams(params).toString(),
     });
     expect(res.statusCode).toBe(200);
+    await app.close();
+  });
+
+  it("STOP from an existing user flips smsOptedOut and sends only the compliance ack", async () => {
+    const { db, users, insertedMessages } = makeFakeDb();
+    users.push({
+      id: "u_alice",
+      phone: "+15550000001",
+      displayName: "Alice",
+      status: "ACTIVE",
+      onboardingStep: null,
+      smsOptedOut: false,
+    });
+    const { client, calls } = makeFakeTwilio();
+    const app = await buildApp({ twilio: { deps: { prisma: db, twilio: client } } });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/webhooks/twilio/inbound",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams({
+        From: "+15550000001",
+        Body: "STOP",
+        MessageSid: "SM" + "s".repeat(32),
+      }).toString(),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.to).toBe("+15550000001");
+    expect(calls[0]!.body).toMatch(/opted out/i);
+    expect(users[0]!.smsOptedOut).toBe(true);
+    // No match message persisted for a meta-protocol STOP.
+    expect(insertedMessages).toEqual([]);
+    await app.close();
+  });
+
+  it("an opted-out recipient gets no relayed messages from their match partner", async () => {
+    const { db, users, matches, insertedMessages } = makeFakeDb();
+    users.push(
+      {
+        id: "u_alice",
+        phone: "+15550000001",
+        displayName: "Alice",
+        status: "ACTIVE",
+        onboardingStep: null,
+        smsOptedOut: false,
+      },
+      {
+        id: "u_bob",
+        phone: "+15550000002",
+        displayName: "Bob",
+        status: "ACTIVE",
+        onboardingStep: null,
+        smsOptedOut: true, // bob has STOPped — no more SMS to him
+      },
+    );
+    matches.push({
+      id: "m_stop",
+      userAId: "u_alice",
+      userBId: "u_bob",
+      state: "ACTIVE",
+      matchDate: new Date(),
+      messages: [],
+      milestones: [],
+    });
+
+    const { client, calls } = makeFakeTwilio();
+    const app = await buildApp({ twilio: { deps: { prisma: db, twilio: client } } });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/webhooks/twilio/inbound",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams({
+        From: "+15550000001",
+        Body: "hi bob, how's your day going?",
+        MessageSid: "SM" + "x".repeat(32),
+      }).toString(),
+    });
+
+    expect(res.statusCode).toBe(200);
+    // Alice's inbound was persisted for the match, but no outbound to Bob.
+    expect(calls).toHaveLength(0);
+    expect(insertedMessages.some((m) => m.senderId === "u_alice")).toBe(true);
+    await app.close();
+  });
+
+  it("HELP from an unknown number replies with compliance copy but does not auto-provision an account", async () => {
+    const { db, users } = makeFakeDb();
+    const { client, calls } = makeFakeTwilio();
+    const app = await buildApp({ twilio: { deps: { prisma: db, twilio: client } } });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/webhooks/twilio/inbound",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams({
+        From: "+15550009999",
+        Body: "HELP",
+        MessageSid: "SM" + "h".repeat(32),
+      }).toString(),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.body).toMatch(/msg.*data rates/i);
+    expect(users).toEqual([]); // no account created
+    await app.close();
+  });
+
+  it("START from an opted-out user re-enables sending", async () => {
+    const { db, users } = makeFakeDb();
+    users.push({
+      id: "u_alice",
+      phone: "+15550000001",
+      displayName: "Alice",
+      status: "ACTIVE",
+      onboardingStep: null,
+      smsOptedOut: true,
+    });
+    const { client, calls } = makeFakeTwilio();
+    const app = await buildApp({ twilio: { deps: { prisma: db, twilio: client } } });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/webhooks/twilio/inbound",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams({
+        From: "+15550000001",
+        Body: "START",
+        MessageSid: "SM" + "r".repeat(32),
+      }).toString(),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.body).toMatch(/opted back in/i);
+    expect(users[0]!.smsOptedOut).toBe(false);
     await app.close();
   });
 });

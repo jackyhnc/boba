@@ -1,0 +1,8 @@
+DONE
+
+GOAL.md checklist is fully checked off — main 13 build items + 9 launch-ready
+phase-2 items. The launch-blocking work that the agent can do is complete; the
+hard blockers remaining (LLC, Twilio account + 10DLC registration, domain,
+deploy) are listed in USER_TODO.md and require human action.
+
+You can safely disable the hourly Boba builder routine now.

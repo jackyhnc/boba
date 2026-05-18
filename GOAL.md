@@ -40,6 +40,7 @@ Boba is a dating app built around conversation before appearance. Anti-swipe, an
 - [x] GitHub Actions CI
 - [x] Sentry hooks
 - [x] DEPLOY.md + refreshed USER_TODO.md
+- [x] SMS carrier compliance (STOP / HELP / START keyword handling — required for 10DLC)
 
 ## Build checklist
 

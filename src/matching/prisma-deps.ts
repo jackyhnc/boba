@@ -32,6 +32,7 @@ export async function loadSelectorContext(
   const users = await prisma.user.findMany({
     where: {
       status: UserStatus.ACTIVE,
+      smsOptedOut: false,
       preferences: { isNot: null },
       stats: { isNot: null },
     },

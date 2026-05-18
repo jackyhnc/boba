@@ -16,6 +16,8 @@ See [DEPLOY.md](./DEPLOY.md) for the end-to-end deploy walkthrough; this file is
 - [ ] **Sign up for [Twilio](https://www.twilio.com/try-twilio).**
 - [ ] **Buy a US long code phone number** with SMS *and* MMS enabled. ~$1/mo.
 - [ ] **Register for A2P 10DLC** (Twilio console → Messaging → Regulatory Compliance). 1–3 business day approval. Without this, US carriers filter your messages. This is the longest-pole item — start it day one.
+- [ ] **In your A2P brand registration: list `support@boba.app` (or whatever support email you'll actually staff) and confirm the opt-out copy.** Boba's own STOP/HELP/START handler is wired up (see "What you do NOT need to do" below), but you must still file the SAMPLE messages with the campaign or carriers will reject traffic.
+- [ ] **Decide whether to enable Twilio's "Advanced Opt-Out" on your Messaging Service.** It's redundant with Boba's built-in STOP/HELP handling — keeping Twilio's on is harmless (it's idempotent), but if you customise our reply copy in `src/safety/smsKeywords.ts`, turn Twilio's off so users see your copy and not theirs.
 - [ ] Once approved, get from the Twilio console and put in your host's secrets:
   - `TWILIO_ACCOUNT_SID` (starts `AC…`)
   - `TWILIO_AUTH_TOKEN`
@@ -65,6 +67,7 @@ The code already handles all of these — listed so you don't reinvent them:
 - ✅ Rematch eligibility (with `hasDiscard` permanent block + 14-day cooldown)
 - ✅ Anti-doxxing + harassment auto-flag
 - ✅ User REPORT keyword + auto-ban at 3 reports
+- ✅ Carrier-required STOP / HELP / START keyword compliance (10DLC)
 - ✅ AI-backed user plumbing
 - ✅ Daily-match scheduler (cron) + manual trigger
 - ✅ Admin endpoints (list users, view conversation, ban, run scheduler, bulk invites)

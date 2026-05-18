@@ -19,6 +19,7 @@ function makeUser(overrides: Partial<RouterUser> = {}): RouterUser {
     displayName: "Alice",
     status: "ACTIVE",
     onboardingStep: null,
+    smsOptedOut: false,
     ...overrides,
   };
 }
@@ -377,5 +378,146 @@ describe("renderRevealBody", () => {
   it("renders an em-dash when the underlying stat is missing", () => {
     const body = renderRevealBody("AGE", { age: null, profession: null, heightCm: null });
     expect(body).toContain("—");
+  });
+});
+
+describe("route — SMS compliance keywords (STOP / HELP / START)", () => {
+  it("STOP from an ACTIVE user: emits sms_stop_ack and flags an opt-out directive", () => {
+    const out = route(makeInput({ body: "STOP" }));
+    expect(out.outbounds).toHaveLength(1);
+    expect(out.outbounds[0]).toMatchObject({
+      kind: "sms_stop_ack",
+      toPhone: PHONE_ALICE,
+      toUserId: "u_alice",
+      isRelay: false,
+      matchId: null,
+    });
+    expect(out.smsOptOutChange).toEqual({
+      userId: "u_alice",
+      optedOut: true,
+      keyword: "STOP",
+    });
+    // The inbound is NOT persisted as a match message — STOP is meta-protocol.
+    expect(out.persistInbound).toBeNull();
+    expect(out.milestonesToRecord).toEqual([]);
+  });
+
+  it("STOP takes priority over an active match: no relay outbound, no message persisted", () => {
+    const out = route(
+      makeInput({
+        body: "STOP",
+        activeMatch: makeMatch({
+          priorMessages: [{ senderId: "u_bob", body: "hi", depthScore: 0 }],
+        }),
+      }),
+    );
+    expect(out.outbounds.find((o) => o.kind === "relay")).toBeUndefined();
+    expect(out.outbounds.find((o) => o.kind === "sms_stop_ack")).toBeDefined();
+    expect(out.persistInbound).toBeNull();
+  });
+
+  it("STOP from an ONBOARDING user still fires", () => {
+    const out = route(
+      makeInput({
+        body: "STOP",
+        sender: makeUser({ status: "ONBOARDING", onboardingStep: "ask_age" }),
+        activeMatch: null,
+      }),
+    );
+    expect(out.outbounds[0]?.kind).toBe("sms_stop_ack");
+    expect(out.smsOptOutChange?.optedOut).toBe(true);
+    expect(out.onboardingAdvance).toBeNull();
+  });
+
+  it("STOP from a BANNED user still confirms opt-out (legal requirement)", () => {
+    const out = route(
+      makeInput({
+        body: "STOP",
+        sender: makeUser({ status: "BANNED" }),
+        activeMatch: null,
+      }),
+    );
+    expect(out.outbounds[0]?.kind).toBe("sms_stop_ack");
+    expect(out.smsOptOutChange?.optedOut).toBe(true);
+  });
+
+  it("STOP from an unknown sender: replies, no directive (nothing to flip)", () => {
+    const out = route({
+      sender: null,
+      fromPhone: PHONE_UNKNOWN,
+      body: "STOP",
+      activeMatch: null,
+    });
+    expect(out.outbounds[0]).toMatchObject({
+      kind: "sms_stop_ack",
+      toPhone: PHONE_UNKNOWN,
+      toUserId: null,
+    });
+    expect(out.smsOptOutChange).toBeNull();
+  });
+
+  it("HELP replies with compliance copy; no opt-out change", () => {
+    const out = route(makeInput({ body: "HELP" }));
+    expect(out.outbounds[0]?.kind).toBe("sms_help_reply");
+    expect(out.outbounds[0]?.body).toMatch(/Msg.*data rates/i);
+    expect(out.smsOptOutChange).toBeNull();
+  });
+
+  it("HELP from an unknown sender still responds (program info)", () => {
+    const out = route({
+      sender: null,
+      fromPhone: PHONE_UNKNOWN,
+      body: "help",
+      activeMatch: null,
+    });
+    expect(out.outbounds[0]?.kind).toBe("sms_help_reply");
+    expect(out.outbounds[0]?.toPhone).toBe(PHONE_UNKNOWN);
+  });
+
+  it("START emits sms_start_ack and flips opt-out off", () => {
+    const out = route(
+      makeInput({
+        body: "START",
+        sender: makeUser({ smsOptedOut: true }),
+      }),
+    );
+    expect(out.outbounds[0]?.kind).toBe("sms_start_ack");
+    expect(out.smsOptOutChange).toEqual({
+      userId: "u_alice",
+      optedOut: false,
+      keyword: "START",
+    });
+  });
+
+  it("an already-opted-out user texting anything else gets dropped silently", () => {
+    const out = route(
+      makeInput({
+        body: "hey, are you ignoring me?",
+        sender: makeUser({ smsOptedOut: true }),
+      }),
+    );
+    expect(out.outbounds).toEqual([]);
+    expect(out.persistInbound).toBeNull();
+    expect(out.smsOptOutChange).toBeNull();
+  });
+
+  it("opted-out user texting START reopens the line", () => {
+    const out = route(
+      makeInput({
+        body: "START",
+        sender: makeUser({ smsOptedOut: true }),
+      }),
+    );
+    expect(out.outbounds[0]?.kind).toBe("sms_start_ack");
+    expect(out.smsOptOutChange?.optedOut).toBe(false);
+  });
+
+  it("compliance keywords are evaluated before REPORT / decision keywords", () => {
+    // CANCEL would be a normal-language word inside REPORT, but as a
+    // first-token it's a STOP. Compliance wins.
+    const out = route(makeInput({ body: "CANCEL" }));
+    expect(out.outbounds[0]?.kind).toBe("sms_stop_ack");
+    expect(out.decisionToRecord).toBeNull();
+    expect(out.moderation).toBeNull();
   });
 });

@@ -25,6 +25,13 @@ import {
   type HarassmentDetection,
 } from "../safety/moderation.js";
 import {
+  detectSmsKeyword,
+  HELP_REPLY,
+  START_ACK,
+  STOP_ACK,
+  type SmsKeyword,
+} from "../safety/smsKeywords.js";
+import {
   detectStatFishing,
   shouldGateBy,
   type StatFishDetection,
@@ -52,6 +59,8 @@ export interface RouterUser {
   displayName: string | null;
   status: UserStatus;
   onboardingStep: OnboardingStepId | null;
+  /** Carrier opt-out (STOP keyword). When true the user must not receive any messages. */
+  smsOptedOut: boolean;
 }
 
 /** Minimal partner shape needed for relay. */
@@ -121,7 +130,10 @@ export interface OutboundAction {
     | "milestone_reveal"
     | "decision_ack"
     | "decision_announcement"
-    | "report_ack";
+    | "report_ack"
+    | "sms_stop_ack"
+    | "sms_help_reply"
+    | "sms_start_ack";
 }
 
 /** Directive for persisting the inbound `Message` row, if applicable. */
@@ -184,6 +196,18 @@ export interface RouteResult {
     latestInbound: { body: string };
     priorTurns: ReadonlyArray<{ fromAi: boolean; body: string }>;
   } | null;
+  /**
+   * Set when the inbound was a carrier-compliance keyword (STOP/HELP/START).
+   * The caller flips `User.smsOptedOut` accordingly. The corresponding
+   * reply outbound has already been queued in `outbounds`.
+   */
+  smsOptOutChange: {
+    userId: string;
+    /** Target state after the change. */
+    optedOut: boolean;
+    /** The keyword that triggered it — used by the IO layer for logging. */
+    keyword: SmsKeyword;
+  } | null;
 }
 
 export type ModerationDirective =
@@ -231,10 +255,31 @@ export const COPY = {
 export function route(input: RouteInput): RouteResult {
   const trimmed = input.body.trim();
 
+  // Carrier-compliance keywords (STOP / HELP / START) take absolute
+  // priority over every other code path. US wireless carriers require
+  // this — if a user texts STOP we MUST acknowledge and stop sending.
+  // HELP must be answered with program info regardless of user state.
+  // We honour these even from unknown senders (no account yet),
+  // banned users (legal requirement), and opted-out users (so they
+  // can opt back in with START).
+  const keyword = detectSmsKeyword(trimmed);
+  if (keyword.keyword) {
+    return routeSmsKeyword(input, keyword.keyword);
+  }
+
+  // Already opted out and not a control keyword → drop silently.
+  // The IO layer should still avoid sending anything to this user, but
+  // we belt-and-brace here so the router doesn't emit relay/onboarding
+  // replies that would never be deliverable.
+  if (input.sender?.smsOptedOut) {
+    return emptyResult();
+  }
+
   // Unknown sender: don't create accounts here — the onboarding SM owns
   // that. Just hand back an intro reply.
   if (!input.sender) {
     return {
+      ...emptyResult(),
       outbounds: [
         {
           toPhone: input.fromPhone,
@@ -246,12 +291,6 @@ export function route(input: RouteInput): RouteResult {
           kind: "unknown_sender_intro",
         },
       ],
-      persistInbound: null,
-      milestonesToRecord: [],
-      onboardingAdvance: null,
-      decisionToRecord: null,
-      moderation: null,
-      aiReplyToGenerate: null,
     };
   }
 
@@ -261,26 +300,10 @@ export function route(input: RouteInput): RouteResult {
     case "BANNED":
       // Soft-fail silently — drop the message, no reply. Reporting still
       // tracks the user, but they don't get to participate.
-      return {
-        outbounds: [],
-        persistInbound: null,
-        milestonesToRecord: [],
-        onboardingAdvance: null,
-        decisionToRecord: null,
-        moderation: null,
-        aiReplyToGenerate: null,
-      };
+      return emptyResult();
 
     case "PAUSED":
-      return {
-        outbounds: [systemReply(user, COPY.paused, "paused")],
-        persistInbound: null,
-        milestonesToRecord: [],
-        onboardingAdvance: null,
-        decisionToRecord: null,
-        moderation: null,
-        aiReplyToGenerate: null,
-      };
+      return { ...emptyResult(), outbounds: [systemReply(user, COPY.paused, "paused")] };
 
     case "ONBOARDING":
       return routeOnboarding(user, trimmed, input.media ?? null, input.onboardingConfig);
@@ -288,6 +311,94 @@ export function route(input: RouteInput): RouteResult {
     case "ACTIVE":
       return routeActive(user, trimmed, input.activeMatch);
   }
+}
+
+function emptyResult(): RouteResult {
+  return {
+    outbounds: [],
+    persistInbound: null,
+    milestonesToRecord: [],
+    onboardingAdvance: null,
+    decisionToRecord: null,
+    moderation: null,
+    aiReplyToGenerate: null,
+    smsOptOutChange: null,
+  };
+}
+
+/**
+ * Carrier-compliance keyword handler. Emits the legally-required reply
+ * and (for STOP/START) a directive to flip `User.smsOptedOut`.
+ *
+ * HELP is answered from anyone — known sender or not — because the user
+ * may not have an account yet.
+ */
+function routeSmsKeyword(input: RouteInput, kw: SmsKeyword): RouteResult {
+  const toPhone = input.sender?.phone ?? input.fromPhone;
+  const toUserId = input.sender?.id ?? null;
+
+  if (kw === "HELP") {
+    return {
+      ...emptyResult(),
+      outbounds: [
+        {
+          toPhone,
+          toUserId,
+          fromUserId: null,
+          body: HELP_REPLY,
+          isRelay: false,
+          matchId: null,
+          kind: "sms_help_reply",
+        },
+      ],
+    };
+  }
+
+  if (kw === "STOP") {
+    // STOP from an unknown sender: nothing to flag, but reply anyway —
+    // they may have a leftover routing setup somewhere expecting us.
+    const smsOptOutChange =
+      input.sender !== null
+        ? { userId: input.sender.id, optedOut: true, keyword: kw }
+        : null;
+    return {
+      ...emptyResult(),
+      outbounds: [
+        {
+          toPhone,
+          toUserId,
+          fromUserId: null,
+          body: STOP_ACK,
+          isRelay: false,
+          matchId: null,
+          kind: "sms_stop_ack",
+        },
+      ],
+      smsOptOutChange,
+    };
+  }
+
+  // START — confirms opt-in. If the user wasn't previously opted out
+  // it's still safe to reply; the directive becomes a no-op.
+  const smsOptOutChange =
+    input.sender !== null
+      ? { userId: input.sender.id, optedOut: false, keyword: kw }
+      : null;
+  return {
+    ...emptyResult(),
+    outbounds: [
+      {
+        toPhone,
+        toUserId,
+        fromUserId: null,
+        body: START_ACK,
+        isRelay: false,
+        matchId: null,
+        kind: "sms_start_ack",
+      },
+    ],
+    smsOptOutChange,
+  };
 }
 
 /**
@@ -303,13 +414,9 @@ function routeOnboarding(
 ): RouteResult {
   const adv = advanceOnboarding(user.onboardingStep, body, { media, ...(config ? { config } : {}) });
   return {
+    ...emptyResult(),
     outbounds: [systemReply(user, adv.reply, "onboarding_stub")],
-    persistInbound: null,
-    milestonesToRecord: [],
     onboardingAdvance: { userId: user.id, advance: adv },
-    decisionToRecord: null,
-    moderation: null,
-    aiReplyToGenerate: null,
   };
 }
 
@@ -320,13 +427,8 @@ function routeActive(
 ): RouteResult {
   if (!active) {
     return {
+      ...emptyResult(),
       outbounds: [systemReply(user, COPY.noMatchHolding, "no_match_holding")],
-      persistInbound: null,
-      milestonesToRecord: [],
-      onboardingAdvance: null,
-      decisionToRecord: null,
-      moderation: null,
-      aiReplyToGenerate: null,
     };
   }
 
@@ -334,6 +436,7 @@ function routeActive(
   const report = parseReportCommand(body);
   if (report) {
     return {
+      ...emptyResult(),
       outbounds: [
         {
           toPhone: user.phone,
@@ -345,10 +448,6 @@ function routeActive(
           kind: "report_ack",
         },
       ],
-      persistInbound: null,
-      milestonesToRecord: [],
-      onboardingAdvance: null,
-      decisionToRecord: null,
       moderation: {
         kind: "user_report",
         reporterId: user.id,
@@ -356,7 +455,6 @@ function routeActive(
         reason: report.reason,
         details: report.details,
       },
-      aiReplyToGenerate: null,
     };
   }
 
@@ -367,6 +465,7 @@ function routeActive(
   const decisionKeyword = parseDecisionKeyword(body);
   if (decisionKeyword) {
     return {
+      ...emptyResult(),
       outbounds: [
         {
           toPhone: user.phone,
@@ -378,9 +477,6 @@ function routeActive(
           kind: "decision_ack",
         },
       ],
-      persistInbound: null,
-      milestonesToRecord: [],
-      onboardingAdvance: null,
       decisionToRecord: {
         matchId: active.id,
         userId: user.id,
@@ -388,8 +484,6 @@ function routeActive(
         partnerUserId: active.partner.id,
         decision: decisionKeyword,
       },
-      moderation: null,
-      aiReplyToGenerate: null,
     };
   }
 
@@ -500,6 +594,7 @@ function routeActive(
     : null;
 
   return {
+    ...emptyResult(),
     outbounds,
     persistInbound: {
       matchId: active.id,
@@ -511,8 +606,6 @@ function routeActive(
       flaggedHarassment: harassment.flagged,
     },
     milestonesToRecord,
-    onboardingAdvance: null,
-    decisionToRecord: null,
     moderation: harassment.flagged
       ? {
           kind: "auto_flag",
