@@ -4,6 +4,30 @@ Reverse-chronological. Newest entries on top. Each entry: timestamp, what shippe
 
 ---
 
+## 2026-05-21T08:08Z — No-op run (BUILD_COMPLETE)
+
+Verified stop condition still holds:
+
+- `BUILD_COMPLETE` present.
+- GOAL.md: 23 items checked, 0 unchecked.
+- Working tree clean.
+- Last code change: 2026-05-20T10:12Z (yesterday's no-op verification run);
+  no source files have changed since the full quality gate passed
+  (293/293 tests, clean typecheck/lint/build on a fresh `npm ci`).
+
+Noted+fixed: on entering this run, local `main` was sitting at the initial
+empty commit while all 19 commits of real work lived on a detached HEAD
+that prior runs had been operating from. Fast-forwarded `main` to `7048c2d`
+so the branch now actually tracks the work. Pushing this run's commit to
+`origin/main` will publish all 19 prior commits in one go — previous
+agents' pushes from a detached HEAD evidently never reached the remote.
+
+No code touched. Hourly routine still firing — human action to disable it
+(see `BUILD_COMPLETE`) remains outstanding and can't be done from inside
+the session. Next agent run: exit immediately.
+
+---
+
 ## 2026-05-17 — Run 5: iMessage relay layer (Twilio)
 
 **Shipped**
