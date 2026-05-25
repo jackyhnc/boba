@@ -4,6 +4,39 @@ Reverse-chronological. Newest entries on top. Each entry: timestamp, what shippe
 
 ---
 
+## 2026-05-25T13:05Z — Recovered stranded integration-test commit onto main
+
+**The real bug this run.** The session opened on a **detached HEAD** at
+`04a22ef` ("test: cross-module day in the life integration test"). Both `main`
+and `origin/main` were one commit behind at `5398d39` — meaning the prior run
+committed that integration test but never fast-forwarded `main` and never
+pushed it. The work (`tests/integration/dayInLife.test.ts`, +4 tests) existed
+only as a dangling commit that the next container reclamation would have
+garbage-collected. Net: real, verified work was at risk of being lost.
+
+**Shipped.** Verified the stranded commit is healthy, then fast-forwarded
+`main` (`5398d39..04a22ef`, clean ff — `main` was its direct parent) and pushed
+so `origin/main` finally contains the integration test.
+
+**Verified on the recovered commit (fresh `npm ci` + `prisma generate`):**
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+- `npm test` — **297/297 passing** across 28 test files
+- `npm run build` — clean
+
+**State.** GOAL.md still fully checked; `BUILD_COMPLETE` still valid and now
+actually reflects what's on the remote. The only outstanding items are the
+human blockers in `USER_TODO.md` (legal entity, Twilio + 10DLC, domain,
+deploy) and disabling this hourly routine.
+
+**Next agent.** No remaining agent-doable build work. Before assuming a no-op,
+always check `git status` / `git rev-parse HEAD main origin/main` — this run
+existed precisely because a prior "done" run left a commit unmerged and
+unpushed. If HEAD == main == origin/main and the tree is clean, exit without
+an empty commit.
+
+---
+
 ## 2026-05-21T00:00Z — No-op run (build still complete)
 
 `BUILD_COMPLETE` has been present since 586a4a5; GOAL.md's checklist is fully
