@@ -912,3 +912,50 @@ Nothing regressed. The hourly routine is still firing; the human action
 to disable it (see `BUILD_COMPLETE`) is still outstanding but is not
 something an agent run can do from inside the session. No further work
 for the next agent — exit immediately.
+
+---
+
+## 2026-05-25T12:21Z — Cross-module "day in the life" integration test
+
+**Context.** `BUILD_COMPLETE` is present and every GOAL.md checklist item was
+already checked. Recent runs were no-op log entries, and the last commit asked
+future agents to skip the empty commit. Rather than add more noise, I audited
+the codebase for a *genuine* gap. Found one: the per-module unit tests all
+build their fixtures by hand and exercise one transition at a time. Nothing
+replayed the actual IO-layer accumulation loop (`src/twilio/routes.ts`:
+route → persist inbound → fold milestones back in → repeat), so the
+*composition* contract between the router, depth scorer, unlock ladder, and
+decision resolver was untested end-to-end.
+
+**Shipped.** `tests/integration/dayInLife.test.ts` (4 tests):
+- A `makeSimulator()` that drives the production inbound loop in-memory:
+  each `send()` builds `RouterActiveMatch` from accumulated state, calls the
+  pure `route()`, then applies `persistInbound` + `milestonesToRecord` back
+  into the running message log / unlocked set — exactly what the real handler
+  does.
+- Test 1 runs 52 alternating turns of a long, benign, question-bearing
+  message (verified to trip neither the stat-fishing nor harassment probes,
+  so depth stays > 0.5). Asserts: exactly one relay per turn to the correct
+  partner; the milestone ladder fires **in strict order** AGE→PROFESSION→HEIGHT
+  and **at the documented thresholds** (turns 10 / 25 / 50 = 10 / 25 / 50 total
+  messages from `DEFAULT_UNLOCK_THRESHOLDS`); each unlock fans a reveal to both
+  sides; no FACE (it's end-of-day, not depth-driven).
+- Tests 2–4 cover the decision seam: a `KEEP` keyword short-circuits relay
+  (no `persistInbound`, just `decision_ack` + `decisionToRecord`); KEEP+KEEP
+  → `resolve()` → `continue`; KEEP+DISCARD → `ended_by_discard` — wiring the
+  router's keyword parse into `src/decisions/flow.ts`'s resolver + copy.
+
+**Verified.** `npm run typecheck`, `npm run lint`, `npm test`
+(**297/297**, +4), `npm run build` — all clean on a fresh `npm ci` +
+`prisma generate`.
+
+**Why this isn't make-work.** It's net-new coverage of the integration seam
+that isolated unit tests structurally cannot reach, and it pins the milestone
+thresholds to concrete turn numbers so any future tuning of
+`DEFAULT_UNLOCK_THRESHOLDS` that breaks the ladder ordering will fail loudly.
+
+**State.** GOAL.md still fully checked; `BUILD_COMPLETE` still valid. The only
+outstanding items are the human blockers in `USER_TODO.md` (entity, Twilio +
+10DLC, domain, deploy) and disabling this hourly routine. Next agent: there is
+no remaining agent-doable build work — if you can't find a *genuine* gap like
+this one, exit without an empty commit.
