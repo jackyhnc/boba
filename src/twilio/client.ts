@@ -18,6 +18,13 @@ export interface SendSmsInput {
   to: string;
   /** Message body. Will be split client-side by Twilio if >1600 chars. */
   body: string;
+  /**
+   * Optional publicly-reachable media URL to attach (MMS). Used for the
+   * end-of-day face reveal. When set, Twilio upgrades the message to MMS
+   * and fetches this URL itself, so it must be reachable from Twilio's
+   * network (not a localhost / signed-but-expiring link).
+   */
+  mediaUrl?: string;
 }
 
 export interface SendSmsResult {
@@ -52,10 +59,10 @@ export function createTwilioClient(deps: TwilioClientDeps): TwilioClient {
   const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
 
   return {
-    async sendSms({ to, body }): Promise<SendSmsResult> {
+    async sendSms({ to, body, mediaUrl }): Promise<SendSmsResult> {
       if (env.TWILIO_DRY_RUN) {
         const sid = `DRYRUN-${cryptoRandomId()}`;
-        logger.info({ to, body, sid, dryRun: true }, "twilio.sendSms (dry run)");
+        logger.info({ to, body, mediaUrl, sid, dryRun: true }, "twilio.sendSms (dry run)");
         return { sid, dryRun: true };
       }
 
@@ -73,6 +80,9 @@ export function createTwilioClient(deps: TwilioClientDeps): TwilioClient {
       const form = new URLSearchParams();
       form.set("To", to);
       form.set("Body", body);
+      if (mediaUrl) {
+        form.set("MediaUrl", mediaUrl);
+      }
       if (env.TWILIO_MESSAGING_SERVICE_SID) {
         form.set("MessagingServiceSid", env.TWILIO_MESSAGING_SERVICE_SID);
       } else {

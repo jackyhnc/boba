@@ -29,6 +29,7 @@ See [DEPLOY.md](./DEPLOY.md) for the end-to-end deploy walkthrough; this file is
 - [ ] **Pick a host: Render or Fly.io.** Both ship in this repo. Render is one click via `render.yaml`. Fly is CLI-first via `fly.toml`. Costs ~$5–15/mo.
 - [ ] **Production Postgres.** Auto-provisioned by Render's blueprint (free tier OK for beta). Fly: `flyctl postgres create`. Avoid using your laptop for prod.
 - [ ] **Generate an `ADMIN_TOKEN`** for the `/admin/*` endpoints. Run locally: `openssl rand -hex 32`. Treat it like a password.
+- [ ] **Host onboarding photos on public storage for the end-of-day FACE reveal.** The reveal sends each user the other's photo as an outbound MMS (Twilio fetches the `MediaUrl` itself). Today onboarding stores the *raw Twilio inbound* media URL in `stats.photoUrl` (`src/onboarding/flow.ts`), which requires your account auth to fetch and is subject to Twilio's media-retention purge — so re-sending it as an outbound `MediaUrl` is not reliable long-term. Before launch, copy each uploaded photo to public object storage (S3 / Cloudflare R2 / Cloudinary) during onboarding and store the *public* URL in `stats.photoUrl`. (No code change is needed in the relay — it already passes `stats.photoUrl` straight through as the MMS media.)
 
 ### Twilio webhooks
 - [ ] **Wire the webhook URLs in Twilio.** After your host is up:

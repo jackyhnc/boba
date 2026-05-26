@@ -4,6 +4,70 @@ Reverse-chronological. Newest entries on top. Each entry: timestamp, what shippe
 
 ---
 
+## 2026-05-26T11:10Z — End-of-day FACE reveal delivery (the missing payoff)
+
+**Context.** `BUILD_COMPLETE` present, GOAL.md fully checked, full gate green
+on a fresh `npm ci` (typecheck / lint / build / 297 tests). Per the routine I
+should not add make-work — so instead of a no-op log I audited for a *genuine*
+gap and found one that's core to the product, not cosmetic.
+
+**The gap.** The PRD's entire premise is "conversation before appearance",
+with **the face revealed at end of day**. `recordDecisionAndMaybeResolve`
+(`src/decisions/prisma-deps.ts:108`) writes the FACE `MilestoneProgress` row
+on a `continue` outcome — but **nothing ever delivered the actual photo**. The
+decision handler in `src/twilio/routes.ts` only sent the text announcement
+("🎉 You're both in…"), and the Twilio client (`src/twilio/client.ts`) had no
+MMS/media support at all (`sendSms` only ever set `To`/`Body`). So the climax
+of the whole app — putting a face to the conversation — was a recorded DB row
+that no user ever saw.
+
+**Shipped.**
+- `src/twilio/client.ts`: `SendSmsInput` gains optional `mediaUrl`; when set we
+  add the `MediaUrl` form param (Twilio upgrades the message to MMS and fetches
+  the URL itself). Dry-run logs the media URL; plain SMS unchanged.
+- `src/twilio/conversation.ts`: `OutboundAction` gains an optional `mediaUrl`
+  and a new `"face_reveal"` kind. (The router stays pure — it can't know the
+  resolution outcome, which requires a DB write.)
+- `src/decisions/flow.ts`: added `faceRevealWithPhoto` / `faceRevealNoPhoto`
+  copy + exported `faceRevealBody(hasPhoto)`. Re-exported from the barrel.
+- `src/twilio/routes.ts`: after `recordDecisionAndMaybeResolve` resolves to
+  `continue`, build two `face_reveal` outbounds via `buildFaceRevealOutbounds`
+  — **each user receives the OTHER person's `stats.photoUrl` as MMS**. New
+  `loadPhotoUrlFor` helper. The send loop now passes `action.mediaUrl` through
+  to `sendSms`. No-photo users fall back to a text-only reveal (no media).
+- Reveals go through the existing opt-out guard (not compliance replies), so an
+  opted-out recipient still gets nothing.
+
+**Tests (+6, 297 → 303, all green).**
+- `tests/twilio/client.test.ts` (new, 3): `MediaUrl` is set when `mediaUrl`
+  passed; omitted for plain SMS; dry-run short-circuits MMS without calling
+  fetch.
+- `tests/twilio/routes.test.ts` (+2): KEEP that resolves to `continue` sends
+  exactly two MMS reveals with the partner's photo crossed over correctly, the
+  FACE milestone is recorded, and the match flips to CONTINUED with a new row
+  for tomorrow; no-photo match falls back to the text-only reveal with no media
+  while the photo'd side still gets their MMS.
+- `tests/decisions/flow.test.ts` (+1): `faceRevealBody` switches on photo
+  presence.
+
+**Verified.** `npm run typecheck`, `npm run lint`, `npm run build`,
+`npm test` (**303/303**) all clean.
+
+**Blocked on user (documented in USER_TODO.md, new hard-blocker bullet).**
+Onboarding currently stores the *raw Twilio inbound* media URL in
+`stats.photoUrl` (`src/onboarding/flow.ts:71`). That URL needs account auth to
+fetch and is subject to Twilio's media-retention purge, so re-sending it as an
+outbound `MediaUrl` is unreliable. Before launch the user must copy uploaded
+photos to public object storage (S3 / R2 / Cloudinary) during onboarding and
+store the public URL instead. The relay already passes `stats.photoUrl`
+straight through, so **no further code change is needed** once storage is wired
+— it's an infra/credentials task only.
+
+**Next agent.** GOAL.md is again fully checked and `BUILD_COMPLETE` stands. If
+you can't find a genuine, product-meaningful gap like this one, exit without an
+empty commit — don't manufacture work. Remaining items are all human blockers
+(LLC, Twilio + 10DLC, domain, deploy, photo hosting) in USER_TODO.md.
+
 ## 2026-05-25T13:05Z — Recovered stranded integration-test commit onto main
 
 **The real bug this run.** The session opened on a **detached HEAD** at

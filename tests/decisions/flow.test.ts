@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  faceRevealBody,
   parseDecisionKeyword,
   replyForOwnDecision,
   resolutionAnnouncement,
@@ -63,5 +64,10 @@ describe("copy helpers", () => {
     expect(resolutionAnnouncement("continue")).toMatch(/continues/i);
     expect(resolutionAnnouncement("ended_by_discard")).toMatch(/ended/i);
     expect(resolutionAnnouncement("pending")).toMatch(/ready/i);
+  });
+  it("faceRevealBody switches on photo presence", () => {
+    expect(faceRevealBody(true)).toMatch(/face behind the conversation/i);
+    expect(faceRevealBody(false)).toMatch(/hasn't added a photo/i);
+    expect(faceRevealBody(true)).not.toBe(faceRevealBody(false));
   });
 });

@@ -66,7 +66,23 @@ export const COPY = {
     "🎉 You're both in. Your conversation continues tomorrow — same number, fresh day.",
   endedByDiscard:
     "This match has ended. We'll set you up with someone new tomorrow.",
+  // Sent alongside the MMS photo at the end-of-day FACE reveal (only on a
+  // `continue` outcome — Boba is conversation-first, so the face is the
+  // last thing unlocked, and only once both sides have chosen to stay).
+  faceRevealWithPhoto:
+    "👀 You earned the reveal — here's the face behind the conversation.",
+  // Fallback when the match never uploaded a photo during onboarding.
+  faceRevealNoPhoto:
+    "👀 Reveal time! Your match hasn't added a photo yet — ask them about it tomorrow.",
 } as const;
+
+/**
+ * Copy for the end-of-day face reveal. We attach the partner's photo as
+ * MMS media when available; otherwise we send the no-photo fallback.
+ */
+export function faceRevealBody(hasPhoto: boolean): string {
+  return hasPhoto ? COPY.faceRevealWithPhoto : COPY.faceRevealNoPhoto;
+}
 
 export function replyForOwnDecision(decision: Decision): string {
   switch (decision) {

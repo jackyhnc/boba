@@ -18,7 +18,7 @@ interface FakeUser {
   status: "ACTIVE" | "ONBOARDING" | "PAUSED" | "BANNED";
   onboardingStep: string | null;
   smsOptedOut?: boolean;
-  stats?: { age: number | null; profession: string | null; heightCm: number | null };
+  stats?: { age: number | null; profession: string | null; heightCm: number | null; photoUrl?: string | null };
 }
 
 interface FakeMatch {
@@ -263,11 +263,14 @@ function makeFakeDb(): {
   return { db, users, matches, invites, insertedMessages, upsertedMilestones };
 }
 
-function makeFakeTwilio(): { client: TwilioClient; calls: Array<{ to: string; body: string }> } {
-  const calls: Array<{ to: string; body: string }> = [];
+function makeFakeTwilio(): {
+  client: TwilioClient;
+  calls: Array<{ to: string; body: string; mediaUrl?: string }>;
+} {
+  const calls: Array<{ to: string; body: string; mediaUrl?: string }> = [];
   const client: TwilioClient = {
-    sendSms: vi.fn(async ({ to, body }) => {
-      calls.push({ to, body });
+    sendSms: vi.fn(async ({ to, body, mediaUrl }) => {
+      calls.push({ to, body, mediaUrl });
       return { sid: `SM_${calls.length}`, dryRun: false, status: 201 };
     }),
   };
@@ -515,6 +518,135 @@ describe("POST /webhooks/twilio/inbound", () => {
     const recipients = calls.map((c) => c.to).sort();
     expect(recipients).toEqual(["+15550000001", "+15550000001", "+15550000002"]);
     expect(matches[0]!.state).toBe("ENDED_BY_DISCARD");
+    await app.close();
+  });
+
+  it("KEEP that resolves to continue delivers a FACE reveal MMS to both users", async () => {
+    const { db, users, matches, upsertedMilestones } = makeFakeDb();
+    users.push(
+      {
+        id: "u_alice",
+        phone: "+15550000001",
+        displayName: "Alice",
+        status: "ACTIVE",
+        onboardingStep: null,
+        stats: { age: 22, profession: "physics", heightCm: 170, photoUrl: "https://cdn.boba.test/alice.jpg" },
+      },
+      {
+        id: "u_bob",
+        phone: "+15550000002",
+        displayName: "Bob",
+        status: "ACTIVE",
+        onboardingStep: null,
+        stats: { age: 24, profession: "designer", heightCm: 180, photoUrl: "https://cdn.boba.test/bob.jpg" },
+      },
+    );
+    const m: FakeMatch & { decisions?: Array<{ userId: string; decision: string }> } = {
+      id: "m_today",
+      userAId: "u_alice",
+      userBId: "u_bob",
+      state: "ACTIVE",
+      matchDate: new Date(),
+      messages: [],
+      milestones: [],
+    };
+    // Bob has already decided KEEP — Alice's KEEP makes it mutual (continue).
+    m.decisions = [{ userId: "u_bob", decision: "KEEP" }];
+    matches.push(m);
+
+    const { client, calls } = makeFakeTwilio();
+    const app = await buildApp({ twilio: { deps: { prisma: db, twilio: client } } });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/webhooks/twilio/inbound",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams({
+        From: "+15550000001",
+        Body: "KEEP",
+        MessageSid: "SM" + "k".repeat(32),
+      }).toString(),
+    });
+    expect(res.statusCode).toBe(200);
+
+    // ack(alice) + announcement(bob) + announcement(alice) + 2 face reveals.
+    const reveals = calls.filter((c) => c.mediaUrl !== undefined);
+    expect(reveals).toHaveLength(2);
+
+    // Each side gets the OTHER person's photo.
+    const aliceReveal = reveals.find((c) => c.to === "+15550000001")!;
+    const bobReveal = reveals.find((c) => c.to === "+15550000002")!;
+    expect(aliceReveal.mediaUrl).toBe("https://cdn.boba.test/bob.jpg");
+    expect(bobReveal.mediaUrl).toBe("https://cdn.boba.test/alice.jpg");
+    expect(aliceReveal.body).toMatch(/face behind the conversation/i);
+
+    // FACE milestone was recorded as part of the resolution.
+    expect(upsertedMilestones.some((mi) => mi.milestone === "FACE")).toBe(true);
+    // Match continued; a fresh row was created for tomorrow.
+    expect(matches[0]!.state).toBe("CONTINUED");
+    expect(matches.some((mm) => mm.id !== "m_today")).toBe(true);
+    await app.close();
+  });
+
+  it("FACE reveal falls back to a no-photo message when the match has no photo", async () => {
+    const { db, users, matches } = makeFakeDb();
+    users.push(
+      {
+        id: "u_alice",
+        phone: "+15550000001",
+        displayName: "Alice",
+        status: "ACTIVE",
+        onboardingStep: null,
+        stats: { age: 22, profession: "physics", heightCm: 170, photoUrl: "https://cdn.boba.test/alice.jpg" },
+      },
+      {
+        id: "u_bob",
+        phone: "+15550000002",
+        displayName: "Bob",
+        status: "ACTIVE",
+        onboardingStep: null,
+        // No photoUrl — Bob skipped the photo step.
+        stats: { age: 24, profession: "designer", heightCm: 180, photoUrl: null },
+      },
+    );
+    const m: FakeMatch & { decisions?: Array<{ userId: string; decision: string }> } = {
+      id: "m_today",
+      userAId: "u_alice",
+      userBId: "u_bob",
+      state: "ACTIVE",
+      matchDate: new Date(),
+      messages: [],
+      milestones: [],
+    };
+    m.decisions = [{ userId: "u_bob", decision: "MAYBE" }];
+    matches.push(m);
+
+    const { client, calls } = makeFakeTwilio();
+    const app = await buildApp({ twilio: { deps: { prisma: db, twilio: client } } });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/webhooks/twilio/inbound",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams({
+        From: "+15550000001",
+        Body: "KEEP",
+        MessageSid: "SM" + "p".repeat(32),
+      }).toString(),
+    });
+    expect(res.statusCode).toBe(200);
+
+    // Alice still gets Bob's reveal — but Bob has no photo, so it's the
+    // text-only fallback with no media.
+    const aliceReveal = calls.find(
+      (c) => c.to === "+15550000001" && /reveal/i.test(c.body),
+    )!;
+    expect(aliceReveal.mediaUrl).toBeUndefined();
+    expect(aliceReveal.body).toMatch(/hasn't added a photo/i);
+
+    // Bob still receives Alice's photo.
+    const bobReveal = calls.find((c) => c.to === "+15550000002" && c.mediaUrl)!;
+    expect(bobReveal.mediaUrl).toBe("https://cdn.boba.test/alice.jpg");
     await app.close();
   });
 

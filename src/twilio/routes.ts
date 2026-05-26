@@ -22,6 +22,7 @@ import { prisma } from "../lib/prisma.js";
 import { createTwilioClient, type TwilioClient } from "./client.js";
 import { createAiPersonaClient, type AiPersonaClient } from "../ai/index.js";
 import {
+  faceRevealBody,
   recordDecisionAndMaybeResolve,
   resolutionAnnouncement,
 } from "../decisions/index.js";
@@ -306,6 +307,22 @@ export async function registerTwilioRoutes(
           kind: "decision_announcement",
         });
       }
+
+      // The payoff: when both sides chose to keep going, reveal the face.
+      // Each user receives the OTHER person's photo as MMS — the last and
+      // most-guarded milestone in Boba's conversation-first ladder. The
+      // FACE MilestoneProgress row was already written inside
+      // `recordDecisionAndMaybeResolve`; here we deliver it.
+      if (resolution.outcome === "continue") {
+        const reveals = await buildFaceRevealOutbounds(db, {
+          matchId: result.decisionToRecord.matchId,
+          deciderId: sender!.id,
+          deciderPhone: sender!.phone,
+          partnerId: result.decisionToRecord.partnerUserId,
+          partnerPhone: result.decisionToRecord.partnerPhone,
+        });
+        result.outbounds.push(...reveals);
+      }
     }
 
     // Record milestones BEFORE sending the reveal SMS so the unlock is
@@ -394,7 +411,11 @@ export async function registerTwilioRoutes(
 
       let sid: string | null = null;
       try {
-        const sent = await twilio.sendSms({ to: action.toPhone, body: finalBody });
+        const sent = await twilio.sendSms({
+          to: action.toPhone,
+          body: finalBody,
+          ...(action.mediaUrl ? { mediaUrl: action.mediaUrl } : {}),
+        });
         sid = sent.sid;
       } catch (err) {
         app.log.error(
@@ -495,6 +516,56 @@ async function materialiseRevealBody(
   if (action.body.includes("{{profession}}")) return renderRevealBody("PROFESSION", stats);
   if (action.body.includes("{{heightCm}}")) return renderRevealBody("HEIGHT", stats);
   return action.body;
+}
+
+/**
+ * Build the two end-of-day FACE reveal outbounds for a continued match.
+ * Each side receives the OTHER person's photo (when present) as MMS.
+ */
+async function buildFaceRevealOutbounds(
+  db: TwilioPrisma,
+  args: {
+    matchId: string;
+    deciderId: string;
+    deciderPhone: string;
+    partnerId: string;
+    partnerPhone: string;
+  },
+): Promise<OutboundAction[]> {
+  const [deciderPhoto, partnerPhoto] = await Promise.all([
+    loadPhotoUrlFor(db, args.deciderId),
+    loadPhotoUrlFor(db, args.partnerId),
+  ]);
+  return [
+    faceRevealOutbound(args.matchId, args.deciderId, args.deciderPhone, partnerPhoto),
+    faceRevealOutbound(args.matchId, args.partnerId, args.partnerPhone, deciderPhoto),
+  ];
+}
+
+function faceRevealOutbound(
+  matchId: string,
+  toUserId: string,
+  toPhone: string,
+  matchPhotoUrl: string | null,
+): OutboundAction {
+  return {
+    toPhone,
+    toUserId,
+    fromUserId: null,
+    body: faceRevealBody(matchPhotoUrl !== null),
+    isRelay: false,
+    matchId,
+    mediaUrl: matchPhotoUrl,
+    kind: "face_reveal",
+  };
+}
+
+async function loadPhotoUrlFor(db: TwilioPrisma, userId: string): Promise<string | null> {
+  const u = await db.user.findUnique({
+    where: { id: userId },
+    select: { stats: { select: { photoUrl: true } } },
+  });
+  return u?.stats?.photoUrl ?? null;
 }
 
 async function loadStatsFor(

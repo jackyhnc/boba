@@ -51,6 +51,7 @@ Boba is a dating app built around conversation before appearance. Anti-swipe, an
 - [x] iMessage relay layer (Twilio webhook handlers — full inbound/outbound routing logic, signature verification, conversation state machine; credentials stubbed)
 - [x] Onboarding state machine driven by SMS
 - [x] End-of-day Keep/Maybe/Discard flow + resolution logic
+- [x] End-of-day FACE reveal delivery: on a `continue` outcome, deliver each user the other's photo as outbound MMS (Twilio `MediaUrl` support in the client + reveal wiring in the relay; no-photo text fallback)
 - [x] Rematch eligibility logic
 - [x] Anti-doxxing: content filter for stat-fishing questions (name/school/instagram/photo asks) before reveals unlock
 - [x] Moderation hooks: profanity/harassment detection stubs, report flow

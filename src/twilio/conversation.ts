@@ -119,6 +119,11 @@ export interface OutboundAction {
   isRelay: boolean;
   /** Optional match id this outbound belongs to (set on relays and reveals). */
   matchId: string | null;
+  /**
+   * Optional MMS media URL. Only the end-of-day `face_reveal` sets this;
+   * the IO layer passes it through to the Twilio client as `MediaUrl`.
+   */
+  mediaUrl?: string | null;
   /** Kind of action — useful for logging, tests and metrics. */
   kind:
     | "unknown_sender_intro"
@@ -128,6 +133,7 @@ export interface OutboundAction {
     | "banned_silent"
     | "relay"
     | "milestone_reveal"
+    | "face_reveal"
     | "decision_ack"
     | "decision_announcement"
     | "report_ack"

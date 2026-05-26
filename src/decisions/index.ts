@@ -5,6 +5,7 @@ export {
   resolve,
   replyForOwnDecision,
   resolutionAnnouncement,
+  faceRevealBody,
   COPY,
 } from "./flow.js";
 export type { Decision, ResolutionOutcome, ResolutionResult } from "./types.js";
