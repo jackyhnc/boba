@@ -4,6 +4,44 @@ Reverse-chronological. Newest entries on top. Each entry: timestamp, what shippe
 
 ---
 
+## 2026-05-26T12:05Z — Recover stranded commits onto main + push (git hygiene)
+
+**Context.** Session started in **detached HEAD** at `cab69d9`, which sat
+**3 commits ahead** of `main` and `origin/main` (both at `5398d39`). The three
+stranded commits were real, validated work that had never reached the remote:
+
+- `04a22ef` — cross-module "day in the life" integration test
+- `566eda6` — a *prior* recovery attempt that itself got stranded (it committed
+  the recovery while still on detached HEAD — the exact trap repeating)
+- `cab69d9` — the end-of-day FACE reveal MMS feature
+
+So the FACE-reveal payoff feature and the integration test existed only in the
+container's local git, invisible on GitHub. This is the recurring failure mode
+in this repo: agents commit while on detached HEAD, so `git push origin main`
+pushes the stale `main` ref and the new work is left behind.
+
+**Shipped.** Validated the stranded tip on a clean tree before touching refs —
+fresh `npm ci` (321 pkgs), `npx prisma generate`, `npm run typecheck`,
+`npm run lint`, `npm test` (**303/303** across 29 files), `npm run build` —
+all green. Then `git checkout main` + `git merge --ff-only cab69d9` (clean
+fast-forward, no merge commit, no divergence) and pushed `origin/main`. The
+FACE reveal + integration test are now actually on the remote.
+
+**Nothing tried that failed.** The fast-forward was unambiguous (merge-base ==
+old `main`, zero commits on `main` absent from HEAD).
+
+**Blocked on user.** Unchanged — the human blockers in `USER_TODO.md` (legal
+entity, Twilio account + 10DLC registration, domain, production deploy) and
+disabling this hourly routine (see `BUILD_COMPLETE`). None are agent-doable.
+
+**Next agent.** GOAL.md is fully checked and `BUILD_COMPLETE` is valid. The
+build work is done. **Critical procedural note: always `git checkout main`
+before committing** — do not commit on detached HEAD, or the work strands again
+exactly as it did here. If you find no *genuine* gap, exit without an empty
+commit. First, confirm `origin/main` == local `main`; if a previous run left
+the repo detached/ahead again, recover it the same way (ff-only) before
+anything else.
+
 ## 2026-05-26T11:10Z — End-of-day FACE reveal delivery (the missing payoff)
 
 **Context.** `BUILD_COMPLETE` present, GOAL.md fully checked, full gate green
