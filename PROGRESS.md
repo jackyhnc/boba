@@ -4,6 +4,57 @@ Reverse-chronological. Newest entries on top. Each entry: timestamp, what shippe
 
 ---
 
+## 2026-05-27T12:07Z — Re-recovered stranded commits onto main (the trap fired AGAIN)
+
+**Context.** Opened in **detached HEAD** at `da2b85e`, with `main` and
+`origin/main` both stuck at `5398d39` — **4 commits behind**. The prior run's
+log (`da2b85e`, "recover stranded commits onto main + log run") *claims* it did
+`git checkout main` + `git merge --ff-only` + push, but the on-disk refs prove
+that never persisted: the recovery commit itself was authored on a detached
+HEAD, so `main`/`origin/main` never moved. The exact failure mode that entry
+warned about repeated one commit later. Stranded chain:
+
+- `da2b85e` — prior recovery log (PROGRESS-only)
+- `cab69d9` — end-of-day FACE reveal as MMS (the product payoff feature)
+- `566eda6` — an earlier stranded recovery attempt
+- `04a22ef` — cross-module "day in the life" integration test
+
+So the FACE-reveal feature + integration test have **never been on the remote**
+despite two prior runs believing they pushed them.
+
+**Shipped.** Verified `main` (5398d39) is a direct ancestor of the tip
+(merge-base == main, `main..HEAD` linear, `HEAD..main` empty) → unambiguous
+fast-forward. Validated the tip on a clean tree first: fresh `npm ci`,
+`npx prisma generate`, `npm run typecheck`, `npm run lint`, `npm run build`,
+`npm test` (**303/303** across 29 files) — all green. Then **`git checkout main`
+(now on a real branch, not detached)**, `git merge --ff-only da2b85e` (clean
+ff, no merge commit), wrote this log, committed on `main`, and pushed
+`origin/main`. The FACE reveal + integration test are now actually published.
+
+**Nothing tried that failed.** The ff was unambiguous.
+
+**Why this keeps happening / how to actually stop it.** Each session starts on
+detached HEAD at the previous run's tip. If you `git commit` before
+`git checkout main`, the new commit attaches to the detached HEAD and `main`
+never advances; `git push origin main` then pushes the stale `main` ref and the
+work strands. **The fix is procedural and non-negotiable: the FIRST git action
+every run must be `git checkout main` (then `git merge --ff-only <old HEAD>` if
+HEAD was ahead). Only commit once `git branch` shows `* main`.** Verify with
+`git rev-parse HEAD main origin/main` — all three must match before you exit.
+
+**Blocked on user.** Unchanged: human-only blockers in `USER_TODO.md` (LLC,
+Twilio account + 10DLC registration, domain, production deploy, public photo
+hosting for MMS reveals) and disabling this hourly routine (`BUILD_COMPLETE`).
+
+**Next agent.** GOAL.md is fully checked; `BUILD_COMPLETE` stands. The build
+work is done. **Before anything else, run `git rev-parse HEAD main origin/main`
+— if they don't all match, a prior run re-stranded; recover via ff-only as
+above BEFORE any other action, and commit only while on `main`.** If all three
+match and the tree is clean, exit without an empty commit — don't manufacture
+work.
+
+---
+
 ## 2026-05-26T12:05Z — Recover stranded commits onto main + push (git hygiene)
 
 **Context.** Session started in **detached HEAD** at `cab69d9`, which sat
