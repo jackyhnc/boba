@@ -4,6 +4,49 @@ Reverse-chronological. Newest entries on top. Each entry: timestamp, what shippe
 
 ---
 
+## 2026-05-27T13:05Z — The "stranding" was a FALSE ALARM. Stop the recovery loop.
+
+**Root cause, finally diagnosed.** The last three runs (`adc0e16`, `da2b85e`,
+`566eda6`) each believed they were rescuing "stranded" commits that had never
+reached the remote. **They were wrong.** Opened this run on detached HEAD at
+`adc0e16` with local `main` / `origin/main` showing `5398d39` — *apparently*
+4 commits behind. But `git ls-remote origin main` reported the **live remote
+was already at `adc0e16`**. The commits were never stranded — every prior push
+landed. What's stale is the container's **`origin/main` remote-tracking ref**,
+which is frozen at whatever the remote was when the container was cloned. Each
+run misread that stale ref as "the remote is behind," manufactured a recovery
+commit, and that fresh commit became the next run's detached tip — re-triggering
+the same false alarm. A self-perpetuating loop that has burned ~3 runs of
+compute producing PROGRESS-only commits that fixed nothing.
+
+**What this run did.** `git checkout main` → `git merge --ff-only adc0e16`
+(clean ff) → **`git fetch origin main`**, which updated the tracking ref and
+confirmed `HEAD == main == origin/main == adc0e16`. Validated the tip on a
+clean tree: `npm ci`, `npx prisma generate`, `npm run typecheck`, `npm run lint`,
+`npm run build`, `npm test` (**303/303** across 29 files) — all green. Then this
+log entry, committed **on `main`**, and pushed.
+
+**The procedure that actually works (do this, not the recovery dance):**
+1. `git fetch origin main` FIRST — this refreshes the stale tracking ref.
+2. `git checkout main && git merge --ff-only <detached-HEAD>` to put the prior
+   run's tip onto a real branch.
+3. Compare `git rev-parse HEAD main origin/main` AFTER the fetch. If they match,
+   **the remote already has everything — exit, do not commit.** The build is
+   complete; there is no genuine work left.
+4. Only ever `git commit` while `git branch` shows `* main`.
+
+**Blocked on user (unchanged).** All human-only blockers live in `USER_TODO.md`:
+LLC, Twilio account + 10DLC registration, domain, production deploy, public
+photo hosting for MMS reveals. Plus disabling this hourly routine — `BUILD_COMPLETE`
+has stood since `586a4a5`; the user must turn the trigger off (agents can't).
+
+**Next agent.** GOAL.md is fully checked; `BUILD_COMPLETE` is valid and the work
+is genuinely on the remote. Run the 4-step procedure above. If the three refs
+match after fetching and the tree is clean — **exit without a commit.** Do not
+"recover" anything; there is nothing stranded. Do not manufacture work.
+
+---
+
 ## 2026-05-27T12:07Z — Re-recovered stranded commits onto main (the trap fired AGAIN)
 
 **Context.** Opened in **detached HEAD** at `da2b85e`, with `main` and
