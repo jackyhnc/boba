@@ -1188,3 +1188,65 @@ outstanding items are the human blockers in `USER_TODO.md` (entity, Twilio +
 10DLC, domain, deploy) and disabling this hourly routine. Next agent: there is
 no remaining agent-doable build work — if you can't find a *genuine* gap like
 this one, exit without an empty commit.
+
+---
+
+## 2026-05-30T12:08Z — Contract test pinning the rematch-eligibility predicates
+
+**Context.** `BUILD_COMPLETE` present, GOAL.md fully checked, every prior
+checklist item shipped. The previous run's note was explicit: skip the empty
+commit unless there's a *genuine* gap. On audit I found one.
+
+**The gap.** The rematch-eligibility rule lives in two places:
+
+1. `src/matching/selector.ts:96-104` — inline `pairEligibleByHistory`, the
+   actual production gate inside `selectDailyMatches`.
+2. `src/rematch/index.ts:55-77` — standalone `isEligibleForRematch`, the
+   public predicate that `src/rematch/index.ts:1-18` advertises as the
+   "first-class side-effect-free" version "for future UIs".
+
+Both are unit-tested in isolation but nothing pinned them in *agreement*. The
+rematch module's own docstring flags the duplication, so the drift risk was
+known — a future tweak to one without the other would silently disagree, and
+the admin UI / debug tooling that's supposed to read from
+`isEligibleForRematch` could tell users "you'll see them in 0 days" while the
+selector still blocks the pair (or vice versa).
+
+**Shipped.** `tests/rematch/contract.test.ts` (19 tests):
+
+- A two-candidate fixture (MAN/WOMAN, strongly compatible — same
+  typeDescriptor, age + height in range) so the *only* thing that can knock
+  the pair out is the history gate.
+- A sanity test that the fixture itself passes with no history (otherwise the
+  rest of the file would be vacuous).
+- A parametric matrix over `lastMatchedOn ∈ {-30, -15, -14, -13, -1, 0, +1}
+  days from today` × `hasDiscard ∈ {false, true}` — exercises both sides of
+  the default 14-day boundary, the boundary day itself, and the "future
+  timestamp" edge.
+- Cooldown override cases (`rematchCooldownDays=2` relaxing in, `=60`
+  tightening out) — proves config flows through both paths.
+- The permanent-discard case at 30d ago — confirms `hasDiscard` blocks
+  regardless of how long ago.
+
+For each state the test computes the selector's verdict (does
+`selectDailyMatches` return the pair?) and the predicate's verdict
+(`isEligibleForRematch(...).eligible`) and asserts they agree.
+
+**Verified.** Fresh `npm ci` + `npx prisma generate`, then:
+
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+- `npm test` — **322/322** across 30 files (4.28s), +19 from the new file
+- `npm run build` — clean
+
+**Why this isn't make-work.** It locks a known-duplicated invariant the code
+itself flags. If anyone tunes one of the predicates (e.g. changes the
+hasDiscard semantics, swaps `>=` for `>` on the cooldown boundary, adds a
+new short-circuit) without touching the other, this file fails loudly
+instead of silently shipping inconsistent answers to different callers.
+
+**State.** GOAL.md still fully checked; `BUILD_COMPLETE` still valid. No
+agent-doable work I can find remains. Human blockers (entity, Twilio +
+10DLC, domain, deploy) still in `USER_TODO.md`. The hourly routine still
+fires; only the human can disable it. Next agent: same advice as before —
+no empty commits unless you've found a real seam to pin down.
