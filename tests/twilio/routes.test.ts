@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { buildApp } from "../../src/app.js";
 import { computeTwilioSignature } from "../../src/twilio/signature.js";
 import { _resetEnvCacheForTests } from "../../src/config/env.js";
+import type { AiPersonaClient, AiReplyRequest } from "../../src/ai/persona.js";
 import type { TwilioClient } from "../../src/twilio/client.js";
 import type { TwilioPrisma } from "../../src/twilio/prisma-deps.js";
 
@@ -18,6 +19,8 @@ interface FakeUser {
   status: "ACTIVE" | "ONBOARDING" | "PAUSED" | "BANNED";
   onboardingStep: string | null;
   smsOptedOut?: boolean;
+  isAiBacked?: boolean;
+  aiPersonaPrompt?: string | null;
   stats?: { age: number | null; profession: string | null; heightCm: number | null; photoUrl?: string | null };
 }
 
@@ -145,8 +148,18 @@ function makeFakeDb(): {
           id: m.id,
           userAId: m.userAId,
           userBId: m.userBId,
-          userA: { id: userA.id, phone: userA.phone },
-          userB: { id: userB.id, phone: userB.phone },
+          userA: {
+            id: userA.id,
+            phone: userA.phone,
+            isAiBacked: userA.isAiBacked ?? false,
+            aiPersonaPrompt: userA.aiPersonaPrompt ?? null,
+          },
+          userB: {
+            id: userB.id,
+            phone: userB.phone,
+            isAiBacked: userB.isAiBacked ?? false,
+            aiPersonaPrompt: userB.aiPersonaPrompt ?? null,
+          },
           messages: m.messages.map((msg) => ({
             senderId: msg.senderId,
             body: msg.body,
@@ -879,6 +892,268 @@ describe("POST /webhooks/twilio/inbound", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]!.body).toMatch(/opted back in/i);
     expect(users[0]!.smsOptedOut).toBe(false);
+    await app.close();
+  });
+});
+
+describe("POST /webhooks/twilio/inbound — AI-backed partner integration", () => {
+  // The pure router (conversation.test.ts) already pins that an AI-backed
+  // partner suppresses the relay outbound and emits an `aiReplyToGenerate`
+  // directive. These tests pin the OTHER half of the contract — what the
+  // route handler does with that directive: it must call the persona
+  // client, persist the AI's reply as an INBOUND from the AI user, and
+  // relay it back to the human over SMS. The pieces are wired in
+  // `src/twilio/routes.ts:339-385`; nothing else covers it end-to-end.
+
+  function makeStubAi(): {
+    client: AiPersonaClient;
+    requests: AiReplyRequest[];
+  } {
+    const requests: AiReplyRequest[] = [];
+    const client: AiPersonaClient = {
+      generateReply: vi.fn(async (req: AiReplyRequest) => {
+        requests.push(req);
+        return { body: `[ai] echo: ${req.latestInbound.body}` };
+      }),
+    };
+    return { client, requests };
+  }
+
+  it("routes a human inbound through the AI persona: no SMS to the AI, reply persisted INBOUND, relay sent to human", async () => {
+    const { db, users, matches, insertedMessages } = makeFakeDb();
+    const humanPhone = "+15550000010";
+    const aiPhone = "+15550000011";
+    users.push(
+      {
+        id: "u_human",
+        phone: humanPhone,
+        displayName: "Human",
+        status: "ACTIVE",
+        onboardingStep: null,
+      },
+      {
+        id: "u_ai",
+        phone: aiPhone,
+        displayName: "Ada",
+        status: "ACTIVE",
+        onboardingStep: null,
+        isAiBacked: true,
+        aiPersonaPrompt: "warm and curious",
+      },
+    );
+    matches.push({
+      id: "m_ai",
+      userAId: "u_human", // lex < "u_ai" so partner = u_ai
+      userBId: "u_ai",
+      state: "ACTIVE",
+      matchDate: new Date(),
+      messages: [],
+      milestones: [],
+    });
+
+    const { client: twilio, calls } = makeFakeTwilio();
+    const { client: aiClient, requests: aiRequests } = makeStubAi();
+    const app = await buildApp({
+      twilio: { deps: { prisma: db, twilio, aiPersonaClient: aiClient } },
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/webhooks/twilio/inbound",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams({
+        From: humanPhone,
+        Body: "hey what are you up to",
+        MessageSid: "SM" + "a".repeat(32),
+      }).toString(),
+    });
+    expect(res.statusCode).toBe(200);
+
+    // 1) Persona client was called with the right context.
+    expect(aiRequests).toHaveLength(1);
+    expect(aiRequests[0]).toMatchObject({
+      matchId: "m_ai",
+      humanUserId: "u_human",
+      aiUserId: "u_ai",
+      personaPrompt: "warm and curious",
+      latestInbound: { body: "hey what are you up to" },
+    });
+
+    // 2) Twilio outbounds: exactly one SMS, to the HUMAN, carrying the AI's
+    //    synthesized reply. The AI's phone never receives a relay (Boba
+    //    doesn't talk to itself).
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.to).toBe(humanPhone);
+    expect(calls[0]!.body).toBe("[ai] echo: hey what are you up to");
+    expect(calls.find((c) => c.to === aiPhone)).toBeUndefined();
+
+    // 3) Persistence: human's inbound + AI's reply (also INBOUND, attributed
+    //    to the AI user) + outbound row for the SMS just sent.
+    const inbound = insertedMessages.filter((m) => m.direction === "INBOUND");
+    const outbound = insertedMessages.filter((m) => m.direction === "OUTBOUND");
+    expect(inbound).toHaveLength(2);
+    expect(inbound[0]).toMatchObject({
+      matchId: "m_ai",
+      senderId: "u_human",
+      body: "hey what are you up to",
+    });
+    expect(inbound[1]).toMatchObject({
+      matchId: "m_ai",
+      senderId: "u_ai",
+      body: "[ai] echo: hey what are you up to",
+    });
+    expect(outbound).toHaveLength(1);
+    expect(outbound[0]).toMatchObject({
+      matchId: "m_ai",
+      // The OUTBOUND row is attributed to the AI user — the SMS is *from*
+      // the persona to the human, so semantically the AI is the sender.
+      // Contrast with the human→partner relay path, where the outbound is
+      // attributed to the originating human (see "relays inbound from
+      // ACTIVE user" above). This asymmetry matters for transcript
+      // analytics and the admin view, and depends on the route handler
+      // passing `fromUserId: req.aiUserId` when assembling the synthesized
+      // outbound (src/twilio/routes.ts:371).
+      senderId: "u_ai",
+      body: "[ai] echo: hey what are you up to",
+    });
+
+    await app.close();
+  });
+
+  it("when no aiPersonaClient is wired (seeding disabled), the human's inbound is still persisted but no AI reply is sent", async () => {
+    const { db, users, matches, insertedMessages } = makeFakeDb();
+    const humanPhone = "+15550000020";
+    const aiPhone = "+15550000021";
+    users.push(
+      {
+        id: "u_human",
+        phone: humanPhone,
+        displayName: "Human",
+        status: "ACTIVE",
+        onboardingStep: null,
+      },
+      {
+        id: "u_ai",
+        phone: aiPhone,
+        displayName: "Ada",
+        status: "ACTIVE",
+        onboardingStep: null,
+        isAiBacked: true,
+        aiPersonaPrompt: "warm and curious",
+      },
+    );
+    matches.push({
+      id: "m_ai_off",
+      userAId: "u_human",
+      userBId: "u_ai",
+      state: "ACTIVE",
+      matchDate: new Date(),
+      messages: [],
+      milestones: [],
+    });
+
+    const { client: twilio, calls } = makeFakeTwilio();
+    // Explicit null — the registerTwilioRoutes contract treats `undefined`
+    // as "build from env" and `null` as "AI seeding disabled".
+    const app = await buildApp({
+      twilio: { deps: { prisma: db, twilio, aiPersonaClient: null } },
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/webhooks/twilio/inbound",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams({
+        From: humanPhone,
+        Body: "hello?",
+        MessageSid: "SM" + "b".repeat(32),
+      }).toString(),
+    });
+    expect(res.statusCode).toBe(200);
+
+    // No SMS at all: the relay was suppressed (partner is AI) and no
+    // AI reply was generated to send back. The route logs and moves on.
+    expect(calls).toEqual([]);
+
+    // The human's inbound is still persisted — milestone counting and
+    // future audits need it. Nothing else.
+    expect(insertedMessages).toHaveLength(1);
+    expect(insertedMessages[0]).toMatchObject({
+      matchId: "m_ai_off",
+      senderId: "u_human",
+      direction: "INBOUND",
+      body: "hello?",
+    });
+
+    await app.close();
+  });
+
+  it("if the persona client throws, the human inbound is still persisted and no AI reply is sent (graceful degradation)", async () => {
+    const { db, users, matches, insertedMessages } = makeFakeDb();
+    const humanPhone = "+15550000030";
+    const aiPhone = "+15550000031";
+    users.push(
+      {
+        id: "u_human",
+        phone: humanPhone,
+        displayName: "Human",
+        status: "ACTIVE",
+        onboardingStep: null,
+      },
+      {
+        id: "u_ai",
+        phone: aiPhone,
+        displayName: "Ada",
+        status: "ACTIVE",
+        onboardingStep: null,
+        isAiBacked: true,
+        aiPersonaPrompt: null,
+      },
+    );
+    matches.push({
+      id: "m_ai_err",
+      userAId: "u_human",
+      userBId: "u_ai",
+      state: "ACTIVE",
+      matchDate: new Date(),
+      messages: [],
+      milestones: [],
+    });
+
+    const { client: twilio, calls } = makeFakeTwilio();
+    const erroringAi: AiPersonaClient = {
+      generateReply: vi.fn(async () => {
+        throw new Error("anthropic: 503");
+      }),
+    };
+    const app = await buildApp({
+      twilio: { deps: { prisma: db, twilio, aiPersonaClient: erroringAi } },
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/webhooks/twilio/inbound",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: new URLSearchParams({
+        From: humanPhone,
+        Body: "anyone home?",
+        MessageSid: "SM" + "c".repeat(32),
+      }).toString(),
+    });
+    // The webhook MUST return 200 even when the AI backend is down —
+    // otherwise Twilio will retry and the inbound persists twice.
+    expect(res.statusCode).toBe(200);
+
+    // Persona was called and threw; no outbound was sent and no AI reply
+    // was persisted. The original human inbound remains.
+    expect(calls).toEqual([]);
+    expect(insertedMessages).toHaveLength(1);
+    expect(insertedMessages[0]).toMatchObject({
+      direction: "INBOUND",
+      senderId: "u_human",
+      body: "anyone home?",
+    });
+
     await app.close();
   });
 });

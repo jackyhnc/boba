@@ -4,6 +4,94 @@ Reverse-chronological. Newest entries on top. Each entry: timestamp, what shippe
 
 ---
 
+## 2026-05-30T13:09Z — Route-layer integration tests for the AI-backed partner flow
+
+**Context.** Third post-completion run. `BUILD_COMPLETE` valid, GOAL.md
+fully checked. Previous run's note explicitly: "no empty commits unless
+you've found a real seam to pin down." On audit, I found one.
+
+**Pre-flight.** `git fetch origin main` confirmed `origin/main` already at
+`99ef4d6` — the local tracking ref was stale exactly as `ec8141c`
+documented. Fast-forwarded local `main` from `ec8141c` → `99ef4d6` (no
+push). Then ran `npm ci` + `npx prisma generate` + the full bar:
+typecheck/lint/test/build all clean at 322/322.
+
+**The gap.** The AI-seeding directive lives at the **router/handler seam**:
+
+1. `src/twilio/conversation.ts:587-600` — the pure router emits an
+   `aiReplyToGenerate` directive when `active.partner.isAiBacked` is true
+   and suppresses the relay outbound. Already tested in
+   `tests/twilio/conversation.test.ts:55-106`.
+2. `src/twilio/routes.ts:339-385` — the HTTP route handler is what
+   *consumes* that directive: it calls `aiPersona.generateReply()`,
+   persists the response as an INBOUND from the AI user, and pushes a
+   relay outbound back to the human. **Zero tests at this layer.**
+
+So the two halves of the AI-backed conversation flow were each unit-tested
+in isolation, but nothing exercised them together. The wire format
+between them — `AiReplyRequest` shape, which fields the handler actually
+uses, the `senderId` attribution choice on the synthesized outbound, the
+"no client wired" silent-drop branch, the "client throws" graceful-fail
+branch — was free to drift undetected.
+
+**Shipped.** `tests/twilio/routes.test.ts` +3 tests (18 → 21) in a new
+`POST /webhooks/twilio/inbound — AI-backed partner integration` describe:
+
+- **Happy path** — human inbound to an AI-backed partner. Asserts:
+  (a) persona's `generateReply` called once with `matchId`, `humanUserId`,
+  `aiUserId`, `personaPrompt`, and `latestInbound.body` populated from the
+  inbound; (b) exactly one Twilio SMS sent, to the human (not the AI —
+  Boba never talks to itself); (c) the body is the persona's synthesized
+  reply; (d) two INBOUND `Message` rows persisted in order — human's
+  original, then AI's reply (so milestone counting sees both); (e) one
+  OUTBOUND row, attributed to **`u_ai`**, not `u_human` — because the
+  handler passes `fromUserId: req.aiUserId` and the persist path uses
+  `fromUserId ?? toUserId`. This is asymmetric with the standard relay
+  path (where outbound senderId = originating human) and the test
+  documents *why*.
+- **AI seeding disabled** — same setup, but `aiPersonaClient: null`.
+  Asserts no Twilio calls and exactly one INBOUND row (the human's
+  message). Pins the contract that `registerTwilioRoutes` treats
+  `undefined` as "build from env" and `null` as "explicitly disabled" —
+  the difference between the two is load-bearing for tests and overrides.
+- **Persona client throws** — `generateReply` rejects with a 503.
+  Asserts: webhook still returns 200 (so Twilio doesn't retry and double-
+  persist); no outbound SMS; human's INBOUND row still there. Pins the
+  graceful-degradation contract.
+
+**Test-fake change.** Extended the in-memory `dailyMatch.findFirst` to
+include `isAiBacked` / `aiPersonaPrompt` on the `userA` / `userB` selects
+(defaulting `false` / `null`). Existing 18 tests in this file all still
+pass — the defaults match the production `loadActiveMatchForUser` shape.
+
+**Verified.** Fresh `npm ci` + `npx prisma generate`. Then:
+
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+- `npm test` — **325/325** across 30 files (4.17s), +3 from new tests
+- `npm run build` — clean
+
+**Why this isn't make-work.** It locks the contract between the pure
+router and the HTTP handler at a seam that's structurally invisible to
+isolated unit tests. If anyone tweaks `AiReplyRequest`'s shape, swaps the
+senderId attribution on the synthesized outbound, accidentally lets the
+"no client" branch propagate the inbound twice, or makes the route return
+5xx when the persona throws (which would cause Twilio retries and
+duplicate INBOUND rows), this file catches it.
+
+**State.** GOAL.md still fully checked; `BUILD_COMPLETE` still valid.
+Human blockers (entity, Twilio + 10DLC, domain, deploy) unchanged in
+`USER_TODO.md`. The hourly routine still fires; only the user can disable
+it. **Next agent: same advice as before — no empty commits unless you've
+found a real seam to pin down.** Candidates I considered and rejected as
+not worth the churn: (i) onboarding flow round-trip through the SMS
+handler — already well-covered by `tests/onboarding/flow.test.ts` plus
+the route-level ONBOARDING cases; (ii) anti-doxxing × milestone unlock
+interaction — covered structurally because `route()` evaluates the
+stat-fishing gate before the unlock predicate.
+
+---
+
 ## 2026-05-27T13:05Z — The "stranding" was a FALSE ALARM. Stop the recovery loop.
 
 **Root cause, finally diagnosed.** The last three runs (`adc0e16`, `da2b85e`,
