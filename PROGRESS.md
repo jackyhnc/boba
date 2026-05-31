@@ -1338,3 +1338,87 @@ agent-doable work I can find remains. Human blockers (entity, Twilio +
 10DLC, domain, deploy) still in `USER_TODO.md`. The hourly routine still
 fires; only the human can disable it. Next agent: same advice as before —
 no empty commits unless you've found a real seam to pin down.
+
+---
+
+## 2026-05-31T13:08Z — Contract test pinning `loadSelectorContext` query + mapping
+
+**Context.** `BUILD_COMPLETE` present, GOAL.md fully checked. Prior two
+runs found genuine seams to pin (rematch predicates agreeing, AI-backed
+route-layer integration). Same brief: skip empty commits, find a real gap.
+
+**The gap.** `loadSelectorContext` (src/matching/prisma-deps.ts:28-84)
+turns three Prisma reads (candidates, matchedTodayPairs, pairHistory) into
+the `SelectorContext` the pure selector consumes. Three invariants live
+there with zero direct coverage:
+
+1. **`smsOptedOut: false` in the candidate filter.** This is the only place
+   that enforces the 10DLC carrier-compliance rule that opted-out users
+   must not be considered for new matches. The flag was added later
+   (migration `20260518080000_sms_opt_out`) and the inbound webhook layer
+   has its own enforcement (tests/twilio/routes.test.ts), but nothing pinned
+   *the selector's* gate. The `runDailyMatch` test (scheduler) uses a fake
+   DB whose `user.findMany` ignores the filter — so silently dropping the
+   `smsOptedOut: false` clause would let every existing test still pass
+   while shipping a compliance regression.
+
+2. **`status: ACTIVE` + non-null `preferences`/`stats` in the same filter.**
+   Same risk profile: dropping any of these would let ONBOARDING / PAUSED
+   / BANNED users (or users mid-onboarding with no profile rows yet) leak
+   into match selection.
+
+3. **Canonical pairKey on read.** `persistDailyMatches` writes via
+   `orderPair` so rows are canonical, but the read side (this function)
+   *also* applies `pairKey` for both `matchedTodayPairs` and `pairHistory`.
+   If the read-side canonicalization were dropped, repeat-match protection
+   and rematch cooldowns would silently misfire on any pair whose stored
+   order disagreed with the lookup order. Plus the UTC-date normalization
+   on `today` (for `dailyMatch.where.matchDate`) and `toDateKey` on
+   `lastMatchedAt` were both unpinned.
+
+**Shipped.** `tests/matching/loadSelectorContext.test.ts` (15 tests across
+5 describe blocks):
+
+- **Candidate filter (3 tests):** pins the exact `where` shape
+  `{ status: ACTIVE, smsOptedOut: false, preferences: { isNot: null },
+  stats: { isNot: null } }`; explicitly asserts `smsOptedOut === false`
+  (not just defined) so a refactor to `smsOptedOut: true` or `undefined`
+  fails loudly; pins the `include: { preferences: true, stats: true }`.
+- **Candidate mapping (4 tests):** verbatim field-by-field mapping of
+  every preference + stat field; `isAiBacked=true` propagation (the AI
+  seeding flag); defensive null-skip guard at line 44 (belt-and-braces in
+  case the include is weakened); stable input order (the selector's
+  tiebreak depends on it).
+- **matchedTodayPairs (4 tests):** UTC-midnight normalization at the day
+  boundary (input `23:59:59.999Z` → query `00:00:00.000Z` of same date);
+  idempotent normalization at midnight; canonical-pairKey lookup
+  symmetric in both orderings (covering writer/reader canonicalization
+  drift); empty case returns a Set, not undefined.
+- **pairHistory (3 tests):** field mapping into `PairHistoryEntry`
+  (lastMatchedOn / hasDiscard / matchCount); UTC-date bucketing of a
+  non-midnight `lastMatchedAt` (no roll-forward/roll-back); empty case
+  returns a Map.
+- **Full assembly (1 test):** all three reads run exactly once (no N+1),
+  all three context keys populated together.
+
+**Verified.** Fresh `npm ci` + `npx prisma generate`, then:
+
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+- `npm test` — **340/340** across 31 files (+15 from the new file)
+- `npm run build` — clean
+
+**Why this isn't make-work.** It pins a 10DLC compliance gate that lives
+in one SQL clause and is structurally invisible to every other test in
+the suite. If a future refactor of `loadSelectorContext` drops or weakens
+the `smsOptedOut: false` filter — or quietly de-canonicalizes the
+pairKey lookups — every other test still passes; this file is what
+catches it.
+
+**State.** GOAL.md still fully checked; `BUILD_COMPLETE` still valid. Human
+blockers (entity, Twilio + 10DLC, domain, deploy) still in `USER_TODO.md`.
+The hourly routine still fires; only the human can disable it. Note for
+next agent: the container's local `origin/main` ref is frozen at clone time
+and reads as "behind" — run `git ls-remote origin main` to see the live
+remote head before manufacturing a "recovery" commit. The prior diagnosis
+in commit `ec8141c` covers this.
