@@ -4,6 +4,139 @@ Reverse-chronological. Newest entries on top. Each entry: timestamp, what shippe
 
 ---
 
+## 2026-05-31T14:09Z — Contract pins for `recordDecisionAndMaybeResolve` (decisions/orderPair, matchCount=2, parentMatchId, FACE key)
+
+**Context.** Fifth post-completion run. `BUILD_COMPLETE` valid, GOAL.md
+fully checked. Standing guidance from prior runs: "no empty commits
+unless you've found a real seam to pin down." On audit, I found one in
+the decision-resolution adapter that the existing behavioural tests
+structurally cannot catch.
+
+**Pre-flight.** Opened on detached HEAD at `4d6d70e`. `git fetch origin
+main` confirmed `origin/main == 4d6d70e` (no stranding — the procedural
+loop from the late-May entries has held). `git checkout main` +
+`git merge --ff-only origin/main` (clean ff, no divergence). Then `npm
+ci` (321 pkgs), `npx prisma generate`, typecheck/lint/test/build all
+green on the tip at **340/340** across 31 files. Refs aligned:
+`HEAD == main == origin/main == 4d6d70e`.
+
+**The gap.** `src/decisions/prisma-deps.ts:28-139` —
+`recordDecisionAndMaybeResolve` — has eight load-bearing invariants at
+the seam between `resolve()` and the DB writes. `tests/decisions/record.test.ts`
+covers the *behavioural* outcomes (resolution shape, state value,
+decisions stored) but uses `userAId="a", userBId="b"` (already canonical)
+throughout, never asserts on `parentMatchId`, never asserts on the
+specific `matchCount` value, and never asserts on the FACE composite-key
+shape. So any of these silent regressions would slip past the suite:
+
+1. **`matchCount: 2` in the continue create arm** (line 133). The
+   matching/persist path writes `matchCount: 1` on the first match. By
+   the time decisions resolve to continue, the pair has been matched
+   twice. If anyone "harmonised" the two to both write `1`, the rematch
+   eligibility cooldowns would silently under-count and pairs would
+   become eligible to re-match sooner than intended.
+2. **`matchCount: { increment: 1 }` in the continue update arm** —
+   trivially-broken absolute writes (e.g. `matchCount: 2`) would
+   stop incrementing on subsequent continuations.
+3. **`orderPair` on the rematchHistory upsert WHERE** in both continue
+   and discard branches. If you pass `(b, a)` and `orderPair` is removed
+   or no-ops, the upsert would target the wrong key, racing with the
+   `(a, b)` row written by the matching/persist path.
+4. **`orderPair` on tomorrow's `dailyMatch.create`** — same. A
+   non-canonical row would also violate the `userAId < userBId`
+   invariant the schema relies on.
+5. **`parentMatchId: match.id`** on tomorrow's match. Drops would break
+   the continuation chain (which the rematch lookups walk).
+6. **`hasDiscard: true` in both the create AND update arms of the
+   discard branch** — only the create arm is asserted in the existing
+   suite (`record.test.ts:159-161`); the update arm — the common path
+   because the matching/persist row already exists — is unpinned.
+7. **The conditional `if (match.state === "ACTIVE")` guard around the
+   AWAITING_DECISION flip.** Without the guard, a user changing their
+   mind would emit a redundant write that flips the state back from
+   `AWAITING_DECISION` to `AWAITING_DECISION` — harmless today, but
+   trivially-breakable if anyone later adds side-effects on the flip.
+8. **The FACE milestone composite key shape** `{ matchId, milestone:
+   "FACE" }` — wrong key fields would mis-target the upsert and
+   either silently re-create on every continuation or write to the
+   wrong slot. `record.test.ts:122` only checks the milestone is
+   present in a recorded array, not the upsert WHERE key.
+
+**Shipped.** `tests/decisions/contract.test.ts` — 15 tests across 6
+describes:
+
+- `orderPair canonicalisation` (3): rematch upsert WHERE uses canonical
+  (a, b) for non-canonical (b, a) input on both the continue and
+  discard branches; tomorrow's dailyMatch.create uses canonical (a, b).
+- `tomorrow's match shape` (2): `parentMatchId` equals current match
+  id; matchDate is `today + 1` UTC; state ACTIVE; compatibilityScore
+  inherited verbatim.
+- `rematchHistory matchCount semantics` (3): create arm pins
+  `matchCount: 2`; update arm pins `{ increment: 1 }` plus
+  `lastMatchedAt` refresh; neither arm carries `hasDiscard` (that
+  belongs to the discard branch).
+- `ended_by_discard rematch shape` (3): create arm sets `hasDiscard:
+  true` and does NOT smuggle `matchCount` (defaults apply); update arm
+  sets `hasDiscard: true` and refreshes `lastMatchedAt`; no tomorrow
+  match is created on discard.
+- `AWAITING_DECISION state-flip is conditional` (2): first decision
+  emits exactly one AWAITING_DECISION update; a same-user mind-change
+  on a pending match does not emit a redundant second flip.
+- `FACE milestone unlock` (2): composite key
+  `{ matchId, milestone: "FACE" }` on continue; no upsert on discard.
+
+The fake DB extends `record.test.ts`'s shape with explicit recorders
+for `dailyMatch.update`, `dailyMatch.create`, `milestoneProgress.upsert`,
+and `rematchHistory.upsert` calls so the WHERE/CREATE/UPDATE arg
+shapes are observable. Existing 5 tests in `record.test.ts` still
+pass — the new file is additive and uses its own helper.
+
+**Verified.** Fresh `npm ci` + `npx prisma generate`. Then:
+
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+- `npm test` — **355/355** across 32 files (4.28s), +15 from new tests,
+  +1 file
+- `npm run build` — clean
+
+**Why this isn't make-work.** Each invariant maps to a specific
+production bug it would catch. `matchCount: 2 → 1` would silently
+shorten rematch cooldowns. `orderPair` removal would race
+rematchHistory rows. `parentMatchId` drop would break the continuation
+chain that downstream rematch lookups walk. The discard-update arm
+(point 6) is the *common* persistence path (the row almost always
+already exists from the matching/persist path) and was completely
+unpinned. None of these have user-visible symptoms in unit tests
+without explicit assertions on the WHERE/CREATE/UPDATE shapes.
+
+**State.** GOAL.md still fully checked; `BUILD_COMPLETE` still valid.
+Human blockers (entity, Twilio + 10DLC, domain, deploy) unchanged in
+`USER_TODO.md`. The hourly routine still fires; only the user can
+disable it. **Next agent: same advice — no empty commits unless you've
+found a real seam to pin down.** Candidates I considered and rejected
+as not worth churn:
+
+- `src/invites/prisma-deps.ts` — `redeemCode`, `createInvite`,
+  `createManyInvites` are thoroughly covered by
+  `tests/invites/redeem.test.ts` (10 tests including the dedupe arm,
+  the self-already-redeemed arm, and the unique-violation retry path).
+- `src/admin/prisma-deps.ts` — `listUsers`, `getConversation`,
+  `banUser`, `unbanUser` are covered through the route tests in
+  `tests/admin/routes.test.ts` with pagination/cursor/conversation
+  view/ban-unban round-trip. The adapter layer's query shape mostly
+  pass-through; little load-bearing logic to pin.
+- `src/safety/prisma-deps.ts` (84 lines) — light adapter; behaviour
+  pinned by `tests/safety/moderation.test.ts` and the route tests.
+
+If a future agent wants to add another contract pin, the un-pinned
+adapter with the most surface area is probably
+`src/twilio/prisma-deps.ts` (look for active-match/photo selects whose
+field shape silently feeds the reveal pipeline) — but verify before
+committing that the existing twilio/routes and twilio/conversation
+tests don't already cover the specific seam.
+
+---
+
 ## 2026-05-30T13:09Z — Route-layer integration tests for the AI-backed partner flow
 
 **Context.** Third post-completion run. `BUILD_COMPLETE` valid, GOAL.md
