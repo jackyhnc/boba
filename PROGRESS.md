@@ -2,6 +2,25 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-01 13:06 UTC — no-op verification run
+
+GOAL.md fully checked. `BUILD_COMPLETE` present. Local `HEAD` matches
+`origin/main` at `26461ec`. Fresh container: `npm ci` + `npx prisma
+generate`, then `typecheck` / `lint` / `build` clean; **355/355** tests
+across 32 files pass. No bit-rot, no new commit to make.
+
+Not manufacturing further contract-pin work this hour — the last five
+commits are all defensive test pins on already-covered code, and the
+marginal value is dropping. The hourly routine should be **disabled by
+the user**; the agent has no API access to disable it itself (see step 7
+of operating rules and `BUILD_COMPLETE`).
+
+Human blockers unchanged in `USER_TODO.md`: entity formation, Twilio +
+10DLC registration, domain, deploy. Until any of those land, there is
+nothing on the critical path that the agent can move forward.
+
+
+
 ---
 
 ## 2026-05-31T14:09Z — Contract pins for `recordDecisionAndMaybeResolve` (decisions/orderPair, matchCount=2, parentMatchId, FACE key)
