@@ -2,6 +2,99 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-01T15:09Z — Contract test pinning `src/admin/prisma-deps.ts`
+
+**Context.** GOAL.md fully checked; `BUILD_COMPLETE` present. Prior agent
+(13:06Z) chose a no-op. Brief: skip empty commits unless a real seam
+shows up. Surveyed every `*/prisma-deps.ts` adapter against its test
+coverage and found one that was only exercised indirectly:
+`src/admin/prisma-deps.ts` has three non-trivial pieces of logic with
+zero direct coverage.
+
+**The gap.** `tests/admin/routes.test.ts` covers the admin endpoints
+end-to-end but its fake DB ignores Prisma's `take`/`skip`/`cursor`
+semantics — every `findMany` just returns whatever it has. That hides
+three regressions a refactor could ship without breaking a test:
+
+1. **`listUsers` limit clamping** — `Math.min(Math.max(limit ?? 25, 1), 100)`.
+   Default 25, floor 1, ceiling 100. The route forwards `?limit=` raw
+   (admin/routes.ts:49). A request with `?limit=99999` or `?limit=0`
+   relies entirely on this clamp; nothing pinned it.
+2. **`listUsers` cursor pagination** — `take: limit + 1` (over-fetch to
+   detect a next page), plus `skip: 1, cursor: { id }` when a cursor is
+   present (Prisma's cursor is inclusive by default — dropping `skip: 1`
+   would duplicate the cursor row at every page boundary). The route
+   exposes `?cursor=` (admin/routes.ts:51) but no existing test exercises
+   that path.
+3. **`unbanUser` always forces `status: "ACTIVE"`** regardless of prior
+   status. The source comment (prisma-deps.ts:131-133) documents this as
+   intentional ("if they were mid-onboarding we leave that to operator
+   judgment via direct DB edits") but no test asserts it. A refactor to
+   "restore to the previous non-BANNED status" would compile, pass the
+   routes test, and silently break the documented operator contract.
+
+**Shipped.** `tests/admin/prisma-deps.test.ts` (33 tests across 7
+describe blocks):
+
+- **listUsers — limit clamping (7 tests).** Default → `take: 26`;
+  `limit=0` clamps to 1 (`take: 2`); negative clamps to 1; `limit=1000`
+  clamps to 100 (`take: 101`); in-range 50 → 51; boundaries 1 and 100
+  preserved.
+- **listUsers — where + orderBy + select (5 tests).** `where: undefined`
+  when no status and when status is explicit null (so the query is
+  unfiltered, not filtered on `undefined`); `where: { status }` when
+  provided; `orderBy: { createdAt: "desc" }`; exact select shape pinned
+  so the admin list view can't accidentally start leaking new columns.
+- **listUsers — cursor pagination (3 tests).** No skip/cursor when
+  absent or null; `skip: 1, cursor: { id }` when present.
+- **listUsers — nextCursor semantics (4 tests).** Null when
+  `rows.length <= limit`; `rows[limit-1].id` (off-by-one trap) when the
+  over-fetch picked up one extra; slice trims the response to exactly
+  `limit` rows.
+- **getConversation (4 tests).** Returns null without touching `message`
+  when the match is missing; match `where` + `select` shape pinned;
+  messages ordered `createdAt: asc` and scoped by `matchId`; message
+  select shape pinned (the `flaggedStatFishing` / `flaggedHarassment`
+  booleans MUST stay visible to moderators).
+- **banUser (5 tests).** Returns null without calling update when user
+  is missing; writes `status: BANNED` and returns the prior status as
+  `before`; preserves whatever prior status came back (PAUSED →
+  BANNED); idempotent on already-BANNED; lookup `select: { status: true }`
+  pinned (no PII fetch).
+- **unbanUser (5 tests).** Returns null without update when missing;
+  always forces ACTIVE — from BANNED, ONBOARDING, PAUSED, and ACTIVE
+  itself — pinning the documented "no restore-to-prior" contract from
+  the source comment.
+
+**Verified.** Fresh `npm ci` + `npx prisma generate`, then:
+
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+- `npm test` — **388/388** across 33 files (4.0s collect + 1.1s run);
+  +33 from the new file
+- `npm run build` — clean
+
+**Why this isn't make-work.** The admin endpoints are the ops team's
+only handle on the system. Limit clamping, cursor pagination, and the
+unban-to-ACTIVE rule are all things the routes test can't catch
+because its fake DB doesn't honour Prisma's pagination semantics —
+this file is what makes a refactor of `admin/prisma-deps.ts` fail
+loudly instead of silently shifting an admin contract.
+
+**State.** GOAL.md still fully checked; `BUILD_COMPLETE` still valid.
+Human blockers unchanged (LLC, Twilio + 10DLC, domain, deploy — all in
+`USER_TODO.md`). Hourly routine still fires; only the human can disable
+it. Note for next agent: every `prisma-deps.ts` module except
+`src/scheduler/prisma-deps.ts` (doesn't exist — runDailyMatch composes
+the other adapters), `src/twilio/prisma-deps.ts` (already covered via
+`tests/twilio/routes.test.ts` integration), `src/safety/prisma-deps.ts`
+(small, covered indirectly via moderation), and `src/onboarding/prisma-deps.ts`
+(thin — covered by flow.test.ts) is now contract-pinned. If you find
+yourself drafting another contract test, double-check it pins something
+that isn't already covered.
+
+---
+
 ## 2026-06-01 13:06 UTC — no-op verification run
 
 GOAL.md fully checked. `BUILD_COMPLETE` present. Local `HEAD` matches
