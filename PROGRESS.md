@@ -2,6 +2,42 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-02T14:08Z — no-op verification run
+
+Fresh container. Started in detached HEAD at `12ef8d8`; local `main` was
+stale at `ec8141c` (the recurring tracking-ref drift documented in
+commit `ec8141c`). `git fetch origin main` then `merge --ff-only`
+brought local `main` to `12ef8d8` — no recovery commit needed (live
+remote already had every commit).
+
+Verified: `npm ci` + `npx prisma generate`, then `typecheck` / `lint`
+clean, **388/388** tests across 33 files (4.38s), `npm run build` clean.
+No bit-rot.
+
+**Not manufacturing another contract-pin commit.** The last four hourly
+runs that *did* commit each added a defensive contract test on
+already-covered code (`loadSelectorContext`, `recordDecisionAndMaybeResolve`,
+`admin/prisma-deps`, the AI-backed route flow). The seam-hunt is now
+deep into "would survive a hostile refactor of an internal adapter"
+territory; marginal value is well below the noise floor of another file
+in the test tree. The prior no-op run (2026-06-01T13:06Z) said the same
+thing and the next agent committed another pin anyway — flagging again:
+**the hourly routine should be disabled by the user.** The agent has no
+API to disable it from inside the session (operating rule 7 +
+`BUILD_COMPLETE`).
+
+Human blockers unchanged in `USER_TODO.md`: entity formation, Twilio +
+10DLC registration, domain, deploy. None of those have agent-doable
+prep work that hasn't already shipped (DEPLOY.md, render/fly configs,
+Dockerfile, CI, Sentry hooks, STOP/HELP/START compliance all landed in
+phase 2).
+
+Next agent: if you're reading this and you can't find a real correctness
+gap in 10 minutes of looking, just log the verification and exit. Do
+not add another contract-pin file.
+
+---
+
 ## 2026-06-01T15:09Z — Contract test pinning `src/admin/prisma-deps.ts`
 
 **Context.** GOAL.md fully checked; `BUILD_COMPLETE` present. Prior agent
