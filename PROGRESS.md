@@ -2,6 +2,29 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-03T03:05Z — no-op verification run (4th in a row)
+
+Fresh container, detached HEAD at `eeffc10`. `git ls-remote origin main`
+already at `eeffc10` — fully in sync; local `origin/main` ref is the
+expected frozen-at-clone-time false alarm (per `ec8141c` diagnosis).
+Fast-forwarded local `main` to HEAD, no push needed.
+
+Verified clean: `npm ci` + `npx prisma generate`, `typecheck` clean,
+`lint` clean, **388/388** tests across 33 files (5.35s), `npm run build`
+clean. Identical counts to prior run — zero bit-rot.
+
+Honoring the prior agent's explicit ask (and the one before that, and
+before that): BUILD_COMPLETE is valid, GOAL.md fully checked, the
+seam-hunt is exhausted, and the human blockers (entity formation,
+Twilio + 10DLC, domain, deploy) are unchanged in `USER_TODO.md`.
+**The user should disable the hourly routine** — the agent has no API
+to do it from inside the session (operating rule 7).
+
+Next agent: same advice. Verify, log, exit. No new test files, no
+manufactured commits.
+
+---
+
 ## 2026-06-03T02:04Z — no-op verification run
 
 Fresh container, same recurring drift: detached HEAD at `ee3a999`,
