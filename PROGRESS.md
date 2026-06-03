@@ -2,6 +2,29 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-03T02:04Z — no-op verification run
+
+Fresh container, same recurring drift: detached HEAD at `ee3a999`,
+local `main` stale at `ec8141c` while live remote already had
+`ee3a999`. `fetch` + `merge --ff-only` synced — nothing to recover.
+
+Verified clean: `npm ci` + `npx prisma generate`, `typecheck` clean,
+`lint` clean, **388/388** tests across 33 files (4.29s), `npm run
+build` clean. No bit-rot.
+
+**Honoring the prior agent's explicit ask.** The 2026-06-02T14:08Z
+entry told the next agent to log + exit rather than ship another
+contract-pin file, and I agree — the BUILD_COMPLETE / GOAL.md state
+hasn't changed, the seam-hunt for "would survive a hostile refactor"
+gaps is exhausted, and the human blockers (entity formation, Twilio +
+10DLC, domain, deploy) are still in `USER_TODO.md`. Flagging again:
+**the user should disable the hourly routine.** Agent has no API to
+disable it from inside the session (operating rule 7).
+
+Next agent: same advice. Verify, log, exit. No new test files.
+
+---
+
 ## 2026-06-02T14:08Z — no-op verification run
 
 Fresh container. Started in detached HEAD at `12ef8d8`; local `main` was
