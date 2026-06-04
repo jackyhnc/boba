@@ -2,6 +2,101 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-04T23:08Z — Contract pins for AI persona client + factory
+
+**Run state.** GOAL.md still 100% checked; `BUILD_COMPLETE` still valid.
+Routine still firing hourly because the human hasn't disabled it; per
+prior agents' standing advice ("no empty commits, hunt for a real
+seam") I went seam-hunting rather than no-op'ing.
+
+**Seam.** `src/ai/persona.ts` (`AnthropicAiPersonaClient`,
+`StubAiPersonaClient`, `buildSystemPrompt`, `buildMessageHistory`) and
+`src/ai/factory.ts` (`createAiPersonaClient`). The existing
+`tests/ai/persona.test.ts` exercises the happy path but doesn't pin
+several production contracts — silent refactors could change behavior
+in ways that pass CI today:
+
+1. **Cost guardrails.** No test pinned `model: "claude-haiku-4-5"` or
+   `max_tokens: 200`. A "let's upgrade to Sonnet for nicer replies"
+   refactor would blow the API budget for AI-seeded users with zero
+   test signal. Pinned both, plus the model-override override path.
+2. **URL composition.** No test pinned `${baseUrl}/messages`. A
+   refactor that joins with `/v1/messages` or drops the suffix would
+   pass. Pinned the default URL exactly, plus a custom-baseUrl case
+   that verifies the path is appended (no double slash, no trailing
+   slash).
+3. **System-prompt structural lines.** The product-critical guidance
+   ("Don't announce that you are an AI", stat-fishing deflection,
+   gated-info list, SMS style) wasn't pinned. A refactor that rewrites
+   the prompt to be friendlier could silently strip these. Pinned each
+   line by substring, plus the four-block `\n\n` join structure with
+   the section order locked (intro → Persona → Style → stat-fishing).
+4. **Default persona fallback.** `personaPrompt` of `null`, `""`, and
+   `"   "` (whitespace) should all hit the warm-curious default; a
+   user-supplied prompt should be `.trim()`'d. None pinned. Pinned all
+   four cases.
+5. **Response parsing edge cases.** Multi-text-block joining (`"\n"`
+   separator), non-text-block filtering (`tool_use` / `image`),
+   missing-or-wrong-type `text` field filtering, whitespace-only
+   joined response throwing `"empty response"`, missing `content`
+   array throwing same. None pinned.
+6. **Error surface.** `anthropic: 500` was pinned; the body slice
+   (max 200 chars), the statusText inclusion, and the
+   `.catch(() => "")` on `res.text()` (so a broken-body Response still
+   reports `anthropic: <status>`) were not. Pinned all three.
+7. **Stub no-network guarantee.** Nothing prevented a future refactor
+   from making the stub hit `fetch` (e.g., "let's add a tiny LLM
+   fallback"). Spied `globalThis.fetch`; pinned that the stub never
+   calls it.
+8. **Stub echo + truncation.** The 160-char cap with 157-char slice +
+   `…` was untested. Pinned with a 200-`a` inbound (exactly checks
+   for 157 a's + ellipsis, no 158-a run); plus a first-sentence-only
+   echo test (multi-sentence inbound shouldn't leak later sentences
+   into the reply); plus a short-sentence-no-ellipsis test (defensive
+   against an off-by-one that always appended `…`).
+9. **Factory precedence.** `createAiPersonaClient` short-circuits on
+   `deps.client` BEFORE the production-no-key safeguard, so tests can
+   inject a deterministic stub even when env says "prod, no key".
+   That ordering was untested — a reorder would still pass the
+   existing override test (which uses `AI_SEEDING_ENABLED=false`).
+   Pinned the override-beats-prod-throw and override-beats-disabled
+   cases. Also pinned that `AI_SEEDING_ENABLED=false` with a present
+   key returns null (no leak of accidentally-set keys), and that
+   successive calls return fresh instances (no hidden memoization).
+
+**Shipped.** `tests/ai/persona.contract.test.ts` — 40 tests across 11
+describe blocks. Each block names one seam and pins one observable
+behavior at a time, so failures localize cleanly.
+
+**Verified.**
+
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+- `npm test` — **531/531** across 38 files (6.05s), +40 from new file
+- `npm run build` — clean
+
+**Gotcha caught during writing.** First draft asserted the system
+prompt splits into 3 blocks on `\n\n`. It's actually 4 — Style and the
+stat-fishing line are separate sections. Fixed before commit; the
+test now pins all four blocks and the order between them. A future
+refactor that consolidates Style + stat-fishing into one block (or
+splits something else off) will fail loudly.
+
+**State.** GOAL.md still fully checked; `BUILD_COMPLETE` still valid.
+Human blockers (entity, Twilio + 10DLC, domain, deploy) still in
+`USER_TODO.md`. Local clone started in detached HEAD at `10385ae`
+because the harness clone was behind origin/main when this session
+started; fetched origin and reattached to main before working. Repro
+of the prior `ec8141c` note: always `git fetch origin main` first.
+
+**Next agent.** Continue contract-pin hunting. Untouched-as-of-this-run
+seams worth a look: `src/scheduler/cron.ts` (cron expression, timezone,
+overlap protection); `src/admin/*` endpoints (auth/RBAC contract, error
+shapes); `src/onboarding` state-machine transition table (what inputs
+move what states); `src/matching` no-repeat invariant under concurrent
+runs. Standing advice unchanged: no empty commits, name one seam,
+pin one behavior at a time.
+
 ## 2026-06-04T05:09Z — Contract test pinning `createTwilioClient`
 
 **Context.** `BUILD_COMPLETE` present, GOAL.md fully checked. Container's
