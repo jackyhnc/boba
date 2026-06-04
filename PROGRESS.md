@@ -2,6 +2,127 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-04T03:10Z — contract pin for twilio/prisma-deps (10DLC opt-out, partner orientation, message direction)
+
+Fresh container, detached HEAD at `7bb1213`. `git fetch origin main`
+→ already at `7bb1213` — fully in sync. Fast-forwarded local `main` to
+HEAD. `npm install` → silent. `npm run typecheck` / `lint` / `test`
+(414/414) / `build` all green. GOAL.md still fully checked,
+`BUILD_COMPLETE` still valid. Routine still fires; only the human can
+disable.
+
+**Standing advice from prior runs.** "No empty commits, hunt for a real
+seam." The 7bb1213 author found the onboarding adapter completely
+unpinned by the loose route fake; I went hunting for the same shape in
+sibling adapters.
+
+**The gap.** `src/twilio/prisma-deps.ts` exports seven functions —
+`findUserByPhone`, `applySmsOptOutChange`, `isSmsOptedOut`,
+`loadActiveMatchForUser`, `persistInboundMessage`,
+`persistOutboundMessage`, `recordDeliveryStatus` — and is invoked
+exclusively through `tests/twilio/routes.test.ts`'s in-memory fake
+`TwilioPrisma`. That fake (lines 81-92) spreads `data` blindly into the
+user row; lines 136-170 synthesize the `dailyMatch.findFirst` partner
+shape from its own store rather than asserting what the adapter passes.
+Five contracts were structurally invisible to the route suite:
+
+1. **10DLC carrier-compliance contract.** `applySmsOptOutChange` must
+   set `smsOptedOutAt = new Date()` on STOP and `smsOptedOutAt = null`
+   on START. The `null` branch is the critical one — `undefined` would
+   leave a stale opt-out timestamp on the row, mis-representing the
+   user's current state to Twilio reviewers / auditors. The routes fake
+   spread `{ smsOptedOut: false }` into a record without ever checking
+   `smsOptedOutAt`, so dropping the null branch would pass every
+   existing test.
+2. **`findUserByPhone` projection.** Exactly 6 fields, narrow select,
+   null on miss, `onboardingStep` string pass-through (the `as
+   RouterUser["onboardingStep"]` cast in the source is a compile-time
+   hint only — runtime is whatever the DB returned).
+3. **Partner orientation.** When the current user is `userAId`, the
+   partner is `userB`; reversed otherwise. Flipping the ternary in the
+   adapter would relay every inbound to the *wrong* recipient — the
+   worst silent failure for a dating app. No existing test covers both
+   orientations against this adapter directly.
+4. **Message direction hard-coding + default flags.**
+   `persistInboundMessage` always writes `direction: "INBOUND"` and
+   defaults `flaggedStatFishing` / `flaggedHarassment` to `false`. A
+   truthy default on the flags would gate every inbound on stat-fishing
+   / harassment. `persistOutboundMessage` mirrors with `"OUTBOUND"` and
+   does NOT write the flag or depthScore columns (those are inbound-only).
+5. **`recordDeliveryStatus` truthiness.** Returns `true` iff a row
+   matches the SID; the `status` argument is currently logging-only and
+   must NOT trigger a write until the schema gains a `deliveryStatus`
+   column.
+
+**Shipped.** `tests/twilio/prisma-deps.test.ts` — 29 tests across 7
+describe blocks:
+
+- **`applySmsOptOutChange` (3):** opt-out stamps a Date in the
+  [before,after] window; opt-in explicitly nulls `smsOptedOutAt` AND
+  the key is present in the patch (not just undefined); the function
+  returns the *input* userId, not whatever Prisma's update echoes back.
+- **`findUserByPhone` (3):** 6-field router shape on hit, null on miss,
+  `onboardingStep` string pass-through (verbatim, no normalization).
+- **`isSmsOptedOut` (3):** narrow 1-field select, false when false,
+  `false` fail-open when the user row is missing (pinning current
+  behavior: Twilio is the source of truth for carrier suppression, so
+  this defensive helper must not fail-closed).
+- **`loadActiveMatchForUser` (6):** null when no match; partner=userB
+  when current=userAId; partner=userA when current=userBId; correct
+  `where`/`orderBy`/`OR` filter; `unlockedMilestones` is a `Set` (not
+  an array — callers use `.has()`); priorMessages pass through verbatim
+  AND the nested `messages.orderBy` is `{ createdAt: "asc" }`; partner
+  projection is exactly the 4 fields the router needs.
+- **`persistInboundMessage` (5):** `direction: "INBOUND"` is hard-coded;
+  both flag defaults are `false`; truthy flags pass through; null
+  twilioSid accepted; returns `{ id }` from the select projection.
+- **`persistOutboundMessage` (5):** `direction: "OUTBOUND"`; all four
+  forwarded fields verbatim; null twilioSid accepted; flag fields and
+  depthScore are NOT in the data payload (inbound-only); returns `{ id }`.
+- **`recordDeliveryStatus` (3):** true on existing SID with correct
+  `where`/`select`; false on miss; no write fires regardless of status
+  (pins the "logging-only until schema gains the column" contract).
+
+**Verified the contracts bite.** Patched the source three ways and re-ran
+the new file:
+
+- Drop the `smsOptedOutAt: null` on opt-in → 1 test fails
+  ("expected undefined to be null").
+- Flip the partner ternary (`match.userA` ↔ `match.userB`) → 3 tests
+  fail (the two orientation tests + the partner projection).
+- Default the inbound flags to `true` instead of `false` → 1 test fails.
+
+Reverted all three patches and confirmed file is back to original.
+
+**Verified clean.**
+
+- `npm run typecheck` — clean (after declaring `vi.fn(async
+  (_args: DailyMatchFindFirstArgs) => ...)` arg types so `mock.calls[0]!`
+  isn't `never`)
+- `npm run lint` — clean
+- `npm test` — **443/443** across 35 files (5.52s), +29 from the new file
+- `npm run build` — clean
+
+**Why this isn't make-work.** The 10DLC opt-out audit trail is one of
+the contracts Twilio specifically asks about during the 10DLC review
+process (registered campaign opt-out logging). The partner-orientation
+contract is the single most catastrophic silent-failure mode in the
+relay — flipping it would deliver every message to the sender's twin
+instead of their match. Both were structurally invisible to every
+existing test until this file.
+
+**State.** GOAL.md still fully checked; `BUILD_COMPLETE` still valid.
+Human blockers (entity, Twilio + 10DLC, domain, deploy) still in
+`USER_TODO.md`. The hourly routine still fires; only the human can
+disable it. Next agent: same standing advice — no empty commits, hunt
+for a real seam. The other prisma-deps adapters all have direct
+contract pins now (admin, decisions, matching, milestones, onboarding,
+safety, invites, twilio); if the next seam isn't obvious, consider
+pure-logic modules with low/no test coverage (check `src/scheduler/`,
+`src/twilio/sendLoop.ts` if it exists). Reminder: always `git fetch
+origin main` before trusting tracking refs — the container's
+`origin/main` is frozen at clone time.
+
 ## 2026-06-03T03:05Z — no-op verification run (4th in a row)
 
 Fresh container, detached HEAD at `eeffc10`. `git ls-remote origin main`
