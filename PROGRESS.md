@@ -2,6 +2,111 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-04T05:09Z — Contract test pinning `createTwilioClient`
+
+**Context.** `BUILD_COMPLETE` present, GOAL.md fully checked. Container's
+local `main` started 12 commits behind `origin/main`; fast-forwarded
+(`ec8141c..ed3e94b`, no merge), `npm ci` clean, baseline `npm test`
+green at 445/445 across 35 files.
+
+Per the standing advice in PROGRESS.md from prior runs: no empty
+verification commits; hunt for a real seam. The recent six commits each
+pinned one prisma-deps adapter (`matching`, `admin`, `twilio` deps,
+`decisions`, `rematch`, `onboarding`, `scheduler/runDailyMatch`). Every
+prisma-deps file has direct test coverage now. Looked elsewhere.
+
+**The gap.** `src/twilio/client.ts` (the outbound SMS/MMS adapter) had
+only one test file (`tests/twilio/client.test.ts`) and it covered
+*only* the MediaUrl form-param branch (MMS present / absent / dry-run).
+Every other invariant of the Twilio REST contract lived unpinned:
+
+1. **Sender selection.** `TWILIO_MESSAGING_SERVICE_SID` ⇒
+   `MessagingServiceSid` form param and NO `From`; `TWILIO_PHONE_NUMBER`
+   only ⇒ `From` and NO `MessagingServiceSid`. Twilio rejects
+   requests carrying both — a refactor that "or-merges" them would
+   surface as 4xx in production, not in tests.
+2. **Credential gates.** Live mode (TWILIO_DRY_RUN=false) with empty
+   SID/token must throw `credentials missing` BEFORE fetch; empty
+   sender must throw `sender missing` BEFORE fetch. Dry-run must skip
+   both gates. The error messages are part of the operator UX.
+3. **HTTP shape.** URL = `https://api.twilio.com/2010-04-01/Accounts/{SID}/Messages.json`
+   with SID URL-encoded, method POST, Authorization header
+   `Basic base64(SID:token)`, Content-Type
+   `application/x-www-form-urlencoded`, Accept `application/json`.
+4. **Error surfaces.** Non-OK throws with status + body verbatim
+   (route layer + scheduler log this); 2xx with no `sid` throws;
+   `safeReadText` failure does not crash the error path.
+5. **Successful-return shape.** Live: `{sid, dryRun:false, status}`;
+   dry-run: `{sid: "DRYRUN-...", dryRun:true, status:undefined}`. The
+   `DRYRUN-` prefix is the only log signal that an outbound was
+   short-circuited.
+
+**Shipped.** `tests/twilio/clientContract.test.ts` — 19 tests across
+6 describe blocks:
+
+- **Sender selection (3):** `MessagingServiceSid` exclusive when set,
+  `From` exclusive when only phone is set, MSID wins when both set.
+- **Credential gates (4):** empty SID throws + skips fetch, empty token
+  throws + skips fetch, empty sender throws + skips fetch, dry-run
+  skips all gates.
+- **HTTP request shape (5):** URL path + method, SID URL-encoding,
+  Basic auth header base64, Content-Type + Accept headers, To/Body/
+  MediaUrl form param values round-trip through URLSearchParams.
+- **Error surfaces (4):** 400 throws with status + body, 5xx throws
+  with status, 2xx with empty body throws `returned no sid`, error path
+  doesn't crash when `safeReadText` fails (status still surfaced).
+- **Successful return shape (2):** live sid + status forwarded,
+  dry-run `DRYRUN-` prefix + undefined status.
+- **Defaulting (1):** construction doesn't throw when `fetchImpl` is
+  omitted (the default `globalThis.fetch` binding is resolved at call
+  time, not at factory time).
+
+**Verified.**
+
+- `npm run typecheck` — clean (after fixing a few
+  `noUncheckedIndexedAccess` accesses on `captured[0]` to match the
+  `[0]!` non-null-assertion pattern used in `tests/twilio/prisma-deps.test.ts`)
+- `npm run lint` — clean
+- `npm test` — **464/464** across 36 files (5.39s), +19 from the new file
+- `npm run build` — clean
+
+**Why this isn't make-work.** Every route + scheduler test that emits
+an outbound goes through a `vi.fn()` mock that returns `{sid, dryRun}`
+without inspecting the call. So a refactor that drops the
+`Authorization` header, sends `application/json` instead of
+url-encoded, sends both `From` AND `MessagingServiceSid`, or
+forgets to URL-encode the SID in the path would pass every existing
+test but 401/422 every live call in production. This file is what
+catches it.
+
+**State.** GOAL.md still fully checked; `BUILD_COMPLETE` still valid.
+Human blockers (entity, Twilio + 10DLC, domain, deploy) still in
+`USER_TODO.md`. The hourly routine still fires; only the human can
+disable it. Next agent: same standing advice — no empty commits, hunt
+for a real seam. Notes for next agent on remaining adapter coverage:
+all `prisma-deps.ts` files are now contract-tested at the adapter
+layer, and `src/twilio/client.ts` is now pinned. Plausible remaining
+seams I considered but did not ship:
+- `src/scheduler/cron.ts` — `startScheduler` already covered for
+  invalid-cron + happy-path; the swallow-on-tick-error invariant (the
+  cron callback's `void runOnce()` shape) is hard to assert without
+  fake timers, and prior agents flagged this as low-leverage given
+  node-cron internals.
+- `src/app.ts` — `buildApp`'s `autoStart` defaulting and decoration
+  invariants. The admin-routes suite exercises the
+  `runDailyMatch` decoration end-to-end with `autoStart:false`, but
+  the env-default branch (`autoStart ?? env.SCHEDULER_ENABLED`) is
+  unpinned. Pinning it cleanly requires mocking `loadEnv` or rebuilding
+  the env loader, which is more refactoring than the seam justifies.
+- `src/twilio/conversation.ts` — the `route` function is exhaustively
+  covered by `conversation.test.ts` (the largest test file in the
+  repo); no obvious gap.
+Standard reminder: the container's local `origin/main` reads as up to
+date even when the remote has moved since clone (see `ec8141c`).
+Always `git fetch origin main` before trusting tracking refs.
+
+---
+
 ## 2026-06-04T04:06Z — contract pins for runDailyMatch (stranded user + persist-before-notify durability)
 
 **Context.** Fresh container, detached HEAD at `7bb1213`, container's
