@@ -2,6 +2,91 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-04T04:06Z — contract pins for runDailyMatch (stranded user + persist-before-notify durability)
+
+**Context.** Fresh container, detached HEAD at `7bb1213`, container's
+local `main` 11 commits behind. `git fetch origin main` →
+`ec8141c..1a982cc`. Checked out `main`, fast-forwarded (no merge).
+`npm install` silent. Baseline `npm run typecheck` / `lint` / `build`
+all clean; `npm test` → 443/443 across 34 files. GOAL.md still fully
+checked; `BUILD_COMPLETE` still valid.
+
+Followed prior agents' standing advice — no empty commits, only ship
+if I find a real uncovered seam.
+
+**The gap.** `src/scheduler/runDailyMatch.ts` had four behaviors that
+the existing `tests/scheduler/runDailyMatch.test.ts` didn't pin:
+
+1. **Stranded-user safety branch** at lines 88-94 (`if (!phone) {
+   logger.warn(...); continue; }`). The documented race: a user row
+   disappeared between `persistDailyMatches` and the second-stage
+   `findMany({ where: { id: { in } } })` for phones. Existing tests
+   used a `fakeDb` whose phone-lookup returned the *same* user list
+   as the candidate query — so they could never exercise the
+   stranded branch. If a refactor turned the `continue` into a
+   `throw` (or into a `notifyErrors.push({...})`), every existing
+   test still passed.
+2. **Persist-before-notify ordering invariant.** The 3rd existing
+   test ("records notify errors but doesn't crash") had ONE notify
+   throw and ONE succeed, so the persist was always visible via the
+   other user's success. It never proved persist happened first —
+   if someone reordered to notify-then-persist and notify totally
+   failed, the persist would be skipped and tests would still pass
+   because no test asserts createdMatches.length === 1 when ALL
+   notifies throw.
+
+**Shipped.** `tests/scheduler/runDailyMatch.test.ts` — two new specs
+appended to the existing `describe("runDailyMatch")`:
+
+- **Stranded user (1 spec, ~85 lines):** inline custom fake DB
+  whose phone-lookup `findMany` filters out `u_w` even though `u_w`
+  is in the candidate set. Asserts: match persisted
+  (`createdMatchIds.length === 1`), only the surviving user
+  notified (`calls.length === 1`, `to === u_m.phone`),
+  `notifyErrors === []` (stranded ≠ error — it's a silent skip).
+  If the `continue` becomes a throw, the run rejects. If it
+  becomes a `notifyErrors.push`, the `[]` assertion fails. Both
+  refactor footguns now caught.
+
+- **Persist-before-notify durability (1 spec):** Twilio client
+  whose `sendSms` throws unconditionally. Asserts: 1 selected
+  match, 1 persisted in createdMatchIds, `fake.createdMatches`
+  has 1 row, `rematchUpserts.count === 1`,
+  `result.notified === []`, `result.notifyErrors.length === 2`
+  with both bearing the "twilio outage" message. If anyone
+  moves `persistDailyMatches` after the notify loop, both
+  `createdMatchIds.length` and `fake.createdMatches.length` go
+  to zero — caught.
+
+**Verified.**
+
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+- `npm test` — **445/445** across 35 files, +2 from the new specs
+- `npm run build` — clean
+
+**Why this isn't make-work.** The stranded-user branch is documented
+in the source comment ("Stranded — user row disappeared between
+persist and lookup. Log + skip.") and is the only thing keeping a
+production race from crashing the entire daily-match run. The
+persist-before-notify ordering is the durability guarantee that
+matches survive a Twilio outage — the whole point of putting the
+DB write before the notify loop. Neither was pinned.
+
+**State.** GOAL.md still fully checked; `BUILD_COMPLETE` still valid.
+Human blockers (entity, Twilio + 10DLC, domain, deploy) still in
+`USER_TODO.md`. The hourly routine still fires; only the human can
+disable it.
+
+Next agent: same standing advice — no empty commits, hunt for a real
+seam. Reminder from prior runs: the container's local `origin/main`
+ref is frozen at clone time and may read "up to date" even when the
+remote has moved (see commit `ec8141c`). Always
+`git fetch origin main` and inspect `git ls-remote origin main`
+against `HEAD` before trusting tracking refs.
+
+---
+
 ## 2026-06-04T03:10Z — contract pin for twilio/prisma-deps (10DLC opt-out, partner orientation, message direction)
 
 Fresh container, detached HEAD at `7bb1213`. `git fetch origin main`

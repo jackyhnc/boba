@@ -183,6 +183,168 @@ describe("runDailyMatch", () => {
     expect(result.notified).toHaveLength(1);
   });
 
+  it("skips a stranded user (phone row vanished between persist and lookup) without crashing or recording a notify error", async () => {
+    // Both users are ACTIVE candidates, so they get matched and the row is
+    // persisted. But the second-stage phone lookup only returns ONE of them —
+    // simulating the race where the user's row was deleted between
+    // persistDailyMatches and the findMany. The contract from
+    // src/scheduler/runDailyMatch.ts:88-94 is: log + skip the stranded side,
+    // notify the survivor, and never count "no phone" as a notify error.
+    const baseUsers: FakeUser[] = [
+      {
+        id: "u_w",
+        phone: "+15550004001",
+        status: "ACTIVE",
+        isAiBacked: false,
+        preferences: {
+          minAge: 20,
+          maxAge: 30,
+          preferredGenders: ["MAN"],
+          minHeightCm: null,
+          maxHeightCm: null,
+          preferredProfessions: [],
+          typeDescriptor: null,
+        },
+        stats: { age: 24, gender: "WOMAN", profession: null, heightCm: 168 },
+      },
+      {
+        id: "u_m",
+        phone: "+15550004002",
+        status: "ACTIVE",
+        isAiBacked: false,
+        preferences: {
+          minAge: 20,
+          maxAge: 30,
+          preferredGenders: ["WOMAN"],
+          minHeightCm: null,
+          maxHeightCm: null,
+          preferredProfessions: [],
+          typeDescriptor: null,
+        },
+        stats: { age: 25, gender: "MAN", profession: null, heightCm: 180 },
+      },
+    ];
+
+    const createdMatches: Array<{ userAId: string; userBId: string }> = [];
+    const db = {
+      user: {
+        findMany: async (args: {
+          where?: { status?: string; id?: { in: string[] } };
+        }) => {
+          if (args.where?.id?.in) {
+            // Phone lookup — return only u_m (u_w stranded).
+            return baseUsers
+              .filter(
+                (u) => args.where!.id!.in.includes(u.id) && u.id !== "u_w",
+              )
+              .map((u) => ({ id: u.id, phone: u.phone }));
+          }
+          return baseUsers;
+        },
+      },
+      dailyMatch: {
+        findMany: async () => [],
+        create: async ({
+          data,
+        }: {
+          data: { userAId: string; userBId: string };
+        }) => {
+          createdMatches.push({ userAId: data.userAId, userBId: data.userBId });
+          return { id: `m_${createdMatches.length}` };
+        },
+      },
+      rematchHistory: {
+        findMany: async () => [],
+        upsert: async () => ({}),
+      },
+      $transaction: (async (fn: (tx: unknown) => Promise<unknown>) =>
+        fn(db)) as unknown as MatchingPrisma["$transaction"],
+    } as unknown as MatchingPrisma & PhoneLookup;
+
+    const { client, calls } = makeFakeTwilio();
+    const result = await runDailyMatch({
+      prisma: db,
+      twilio: client,
+      today: TODAY,
+    });
+
+    // Match was persisted before the stranded lookup, so it survives.
+    expect(result.selected).toHaveLength(1);
+    expect(result.createdMatchIds).toHaveLength(1);
+    expect(createdMatches).toHaveLength(1);
+
+    // Only the surviving user is notified.
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.to).toBe("+15550004002");
+    expect(result.notified).toEqual(["+15550004002"]);
+
+    // Stranded side is NOT a notify error — it's a silent skip.
+    expect(result.notifyErrors).toEqual([]);
+  });
+
+  it("keeps persisted matches in the result even when every notify throws (persist-before-notify durability)", async () => {
+    // Twilio is totally down. Both notifications throw. The match must still
+    // be persisted and surface in createdMatchIds, and both failures must
+    // land in notifyErrors. This pins the ordering invariant that
+    // persistDailyMatches runs before any sendSms call.
+    const fake = makeFakeDb({
+      users: [
+        {
+          id: "u_w",
+          phone: "+15550005001",
+          status: "ACTIVE",
+          isAiBacked: false,
+          preferences: {
+            minAge: 20,
+            maxAge: 30,
+            preferredGenders: ["MAN"],
+            minHeightCm: null,
+            maxHeightCm: null,
+            preferredProfessions: [],
+            typeDescriptor: null,
+          },
+          stats: { age: 24, gender: "WOMAN", profession: null, heightCm: 168 },
+        },
+        {
+          id: "u_m",
+          phone: "+15550005002",
+          status: "ACTIVE",
+          isAiBacked: false,
+          preferences: {
+            minAge: 20,
+            maxAge: 30,
+            preferredGenders: ["WOMAN"],
+            minHeightCm: null,
+            maxHeightCm: null,
+            preferredProfessions: [],
+            typeDescriptor: null,
+          },
+          stats: { age: 25, gender: "MAN", profession: null, heightCm: 180 },
+        },
+      ],
+    });
+    const allFailClient: TwilioClient = {
+      sendSms: vi.fn(async () => {
+        throw new Error("twilio outage");
+      }),
+    };
+    const result = await runDailyMatch({
+      prisma: fake.db,
+      twilio: allFailClient,
+      today: TODAY,
+    });
+
+    expect(result.selected).toHaveLength(1);
+    expect(result.createdMatchIds).toHaveLength(1);
+    expect(fake.createdMatches).toHaveLength(1);
+    expect(fake.rematchUpserts.count).toBe(1);
+    expect(result.notified).toEqual([]);
+    expect(result.notifyErrors).toHaveLength(2);
+    for (const e of result.notifyErrors) {
+      expect(e.error).toMatch(/twilio outage/);
+    }
+  });
+
   it("uses a custom notification body when provided", async () => {
     const fake = makeFakeDb({
       users: [
