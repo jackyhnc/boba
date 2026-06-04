@@ -1749,3 +1749,92 @@ next agent: the container's local `origin/main` ref is frozen at clone time
 and reads as "behind" — run `git ls-remote origin main` to see the live
 remote head before manufacturing a "recovery" commit. The prior diagnosis
 in commit `ec8141c` covers this.
+
+---
+
+## 2026-06-04T02:07Z — Contract test pinning `persistOnboardingUpdates`
+
+**Context.** `BUILD_COMPLETE` present, GOAL.md fully checked, container's
+local `main` started behind `origin/main` (fast-forwarded `ec8141c..6944ad0`,
+no merge). The recent three commits on origin were all empty "no-op
+verification" runs and prior agents explicitly asked future runs to skip
+those unless a real seam was found. Looked for one.
+
+**The gap.** `persistOnboardingUpdates` (src/onboarding/prisma-deps.ts:18-55)
+is the only path that writes the User/Stats/Preferences rows during
+onboarding. Every inbound that advances the state machine in
+`src/twilio/routes.ts` lines 251 + 260 lands here. But:
+
+- `tests/onboarding/flow.test.ts` covers only the pure `advance`
+  function and `mergeUpdates` — never touches the adapter.
+- `tests/twilio/routes.test.ts`'s fake DB has `stats.upsert` as a no-op
+  that *cherry-picks* `age`/`profession`/`heightCm` into the test view
+  (lines 115-130) and `preferences.upsert` as `async () => ({})`
+  (line 132-134). Whatever the adapter actually passes to those methods
+  is invisible to the route suite.
+
+Five invariants lived unpinned:
+
+1. `markActive: true` overrides `nextStep` — the source assigns
+   `userPatch.onboardingStep = nextStep` first then overwrites it to
+   `null`. Swap the order or drop the second assignment and the cursor
+   would point at "done" forever instead of clearing.
+2. Empty `updates.stats` / `updates.preferences` objects (`{}`) must
+   skip the upsert entirely. This is the only guard against a `{}`
+   payload, which Prisma would reject at runtime since the schema's
+   create payload requires non-null fields beyond `userId`.
+3. `userId` belongs only in `create`, never in `update`. Sneaking it
+   into `update` would tickle Prisma's "cannot change unique" rejection.
+4. The runtime check on `displayName`/`campusEmailDomain` is
+   `!== undefined`, NOT truthiness. An explicit `""` from a future
+   parser change should land in the DB, not be silently dropped.
+5. Call order is `user.update` → `stats.upsert` → `preferences.upsert`.
+   A `user.update` failure must short-circuit before stats / preferences
+   are touched (so a transient DB issue can't half-write).
+
+**Shipped.** `tests/onboarding/persist.test.ts` — 26 tests across 6
+describe blocks:
+
+- **Base cursor advance (2):** the minimal `{ onboardingStep: nextStep }`
+  payload + verbatim nextStep pass-through.
+- **`markActive` terminal write (3):** clears the cursor + sets ACTIVE
+  even when nextStep is "done", clears it regardless of nextStep value
+  (so a future caller that passes a real step + markActive can't desync),
+  merges user fields into the terminal write.
+- **User field projection (5):** displayName, both fields together,
+  empty `updates.user` omits keys, missing `updates.user` is equivalent
+  to empty, empty-string displayName lands in DB (the `!== undefined`
+  guard — pins the contract that the adapter doesn't second-guess the
+  parser).
+- **Stats upsert (5):** canonical create+update shape, `userId` excluded
+  from update, skip on missing, skip on empty `{}`, photoUrl forwarding.
+- **Preferences upsert (5):** mirror of stats — same five invariants for
+  the preferences write, including the array-valued `preferredGenders`.
+- **Composition & call order (6):** all-three call order is
+  user→stats→preferences; cursor-only writes only `user.update`; partial
+  inputs skip the right slot; `user.update` failure short-circuits stats
+  + preferences; `stats.upsert` failure short-circuits preferences but
+  not user; idempotent call-shape under repeated invocation.
+
+**Verified.**
+
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+- `npm test` — **414/414** across 34 files (4.75s), +26 from the new file
+- `npm run build` — clean
+
+**Why this isn't make-work.** The routes integration suite uses a fake
+DB that ignores the upsert arguments entirely — so a refactor that
+drops the `Object.keys(...).length > 0` guard (causing `{}` upserts in
+prod), swaps the `markActive` write order (so the cursor sticks at
+"done"), or moves `userId` into the update branch would pass every
+existing test. This file is what catches it.
+
+**State.** GOAL.md still fully checked; `BUILD_COMPLETE` still valid.
+Human blockers (entity, Twilio + 10DLC, domain, deploy) still in
+`USER_TODO.md`. The hourly routine still fires; only the human can
+disable it. Next agent: same standing advice — no empty commits, hunt
+for a real seam. Reminder from prior runs: the container's local
+`origin/main` reads as "up to date" even when the remote has moved
+since clone (see `ec8141c`). Always `git fetch origin main` before
+trusting tracking refs.
