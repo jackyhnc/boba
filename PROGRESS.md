@@ -2149,3 +2149,87 @@ for a real seam. Reminder from prior runs: the container's local
 `origin/main` reads as "up to date" even when the remote has moved
 since clone (see `ec8141c`). Always `git fetch origin main` before
 trusting tracking refs.
+
+
+---
+
+## 2026-06-04T22:08Z — Contract test pinning `recordReport` / `incrementReportCount`
+
+**Context.** `BUILD_COMPLETE` present, GOAL.md fully checked. Container's
+local `main` was clean and in sync with `origin/main` at clone. Continuing
+the prior agents' pattern: skip empty-commit no-op runs unless I find a
+genuine seam, and pin it.
+
+**The gap.** `src/safety/prisma-deps.ts` exposes the moderation adapter:
+
+- `recordReport(prisma, input)` — opens a `$transaction`, creates a Report
+  row, bumps the subject's `reportCount`, and on `>= autoBanThreshold`
+  (default 3) flips the subject's `status` to BANNED inside the same tx.
+- `incrementReportCount(prisma, userId)` — bare counter bump for the
+  system-auto-flag path. NO transaction, NO Report row, NO auto-ban.
+
+`tests/safety/moderation.test.ts` already covers detectHarassment +
+parseReportCommand thoroughly, and has 4 tests against a fake DB for the
+adapter. But its fake has only a single counter and a single status field
+— it cannot distinguish `subjectId` from `reporterId` in the WHERE clause,
+does not capture whether `$transaction` was actually invoked, and does not
+pin the exact payload shapes passed to `report.create` / `user.update`.
+Those seams refactors silently break:
+
+1. **`user.update` WHERE targets `subjectId`, not `reporterId`.** A typo'd
+   swap (one identifier mention only — easy refactor mistake) would still
+   pass the existing test because the fake DB ignores the where clause
+   entirely. The new fake keeps a per-user counter map and statuses
+   keyed by id, so the swap becomes observable.
+2. **`$transaction` wrapper is actually invoked.** Dropping it would still
+   pass the existing test because the fake `$transaction` just calls
+   `fn(db)` — same end state, no atomicity in prod. The new test pins
+   `$transaction.toHaveBeenCalledTimes(1)` for the recordReport path and
+   `not.toHaveBeenCalled()` for incrementReportCount.
+3. **Report `create.data` shape: EXACTLY 4 fields, no extras.** Sneaking
+   `id`, `createdAt`, or any other key in would either duplicate Prisma
+   defaults or shadow ones the schema owns. Pinned via
+   `Object.keys(data).sort()` equality plus full-object equality.
+4. **Auto-ban update payload is `{ status: "BANNED" }` exactly.** Not
+   combining the bump + ban into one update. Pinned via deep-equal on the
+   second `user.update` call's `data`, and a defensive assertion that
+   `data.reportCount` is undefined.
+5. **Threshold semantics are `>=` (inclusive), and 3 is the default.**
+   Pinned via four boundary cases: at-threshold-fires, one-below-doesn't,
+   custom-threshold-of-1 fires on first bump, custom-threshold-above-3
+   doesn't fire at the default boundary.
+6. **`incrementReportCount` is counter-only.** Pinned explicitly: never
+   calls `$transaction`, never calls `report.create`, never auto-bans
+   even after three consecutive bumps that cross the default threshold.
+7. **Counter bumps use literal `+1`.** Pinned via
+   `data.toEqual({ reportCount: { increment: 1 } })` so a "make this
+   configurable" refactor that changes the magnitude is caught.
+8. **`select` clauses pin no-over-fetch:** `report.create` selects only
+   `id`, `user.update` (bump) selects only `reportCount`.
+
+**Shipped.** `tests/safety/recordReport.test.ts` — 27 tests across 7
+describe blocks. Fake DB upgraded vs the moderation suite's: per-user
+`counts` and `statuses` maps so reporterId↔subjectId swaps are observable;
+`$transaction` is a real `vi.fn` so invocation count is checkable;
+`callOrder` array captures sequencing.
+
+**Verified.**
+
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+- `npm test` — **491/491** across 37 files (4.94s), +27 from the new file
+- `npm run build` — clean
+
+**Why this isn't make-work.** Two of the most dangerous regressions in this
+adapter (banning the reporter instead of the subject; silently losing the
+`$transaction` so a half-write can ship) would slip past every other test
+in the suite, including the existing `recordReport` tests in
+`moderation.test.ts`. The new fake DB is what makes them observable.
+
+**State.** GOAL.md still fully checked; `BUILD_COMPLETE` still valid. Human
+blockers (entity, Twilio + 10DLC, domain, deploy) still in `USER_TODO.md`.
+The hourly routine still fires; only the human can disable it. Standing
+advice for next agent: no empty commits, hunt for a real seam. Reminder
+from prior runs: the container's local `origin/main` reads as "up to date"
+even when the remote has moved since clone — always `git fetch origin
+main` before trusting tracking refs (see commit `ec8141c`).
