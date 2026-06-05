@@ -2,6 +2,88 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-05T06:11Z — Contract pins for env config (boolean flag asymmetry, validation, caching)
+
+**Run state.** GOAL.md still 100% checked; `BUILD_COMPLETE` still valid;
+routine still firing because the human hasn't disabled it. Continuing
+the prior agents' "hunt for a real seam" approach rather than no-op
+commits.
+
+**Seam.** `src/config/env.ts` had only 2 tests (`tests/env.test.ts`,
+39 lines) covering 14 env vars with several load-bearing contracts.
+Highest-value unpinned contract: the **asymmetric boolean flag
+defaults**. Two flags are safe-by-default and use
+`v.toLowerCase() !== "false"` (TWILIO_DRY_RUN, INVITES_REQUIRED);
+three are off-by-default and use `=== "true"` (TWILIO_REQUIRE_SIGNATURE,
+AI_SEEDING_ENABLED, SCHEDULER_ENABLED). A well-intentioned refactor
+that "standardises all booleans through one helper" would silently
+flip TWILIO_DRY_RUN to false-by-default — and the next dev run would
+send real SMS, burning Twilio credit and trust. No test signal today.
+
+Pins added (30 new tests, file grew 39 → 318 lines):
+
+1. **Default-orientation per flag** (5 tests, one per flag).
+   TWILIO_DRY_RUN=true, INVITES_REQUIRED=true,
+   TWILIO_REQUIRE_SIGNATURE=false, AI_SEEDING_ENABLED=false,
+   SCHEDULER_ENABLED=false when unset.
+2. **Parsing semantics** (5 tests). Default-true flags coerce ANY
+   non-`"false"` value (including typos, empty string, whitespace) to
+   true; default-false flags coerce ANY non-`"true"` value to false.
+   Both are case-insensitive. Plus a guard that every flag resolves to
+   a `boolean` (not `string|undefined`) — so downstream `if (env.FLAG)`
+   never sees the literal `"false"` as truthy.
+3. **Other defaults** (7 tests). PORT=3000 (number, not string),
+   DATABASE_URL=`postgresql://boba:boba@localhost:5432/boba?schema=public`,
+   PUBLIC_WEBHOOK_BASE_URL=`http://localhost:3000`,
+   SCHEDULER_CRON=`0 21 * * *` (protects the daily-match SLA from
+   silent reschedules), SENTRY_TRACES_SAMPLE_RATE=0, LOG_LEVEL=info,
+   and Twilio/Anthropic/Admin/Sentry credentials default to `""` (not
+   undefined) so call sites doing `.length`/truthy checks stay safe.
+4. **Validation + coercion** (10 tests). PORT="8080" → 8080 number;
+   PORT=0/-1/3.14 → throw; NODE_ENV must be development/test/production;
+   LOG_LEVEL must be one of pino's six; PUBLIC_WEBHOOK_BASE_URL must
+   parse as URL; DATABASE_URL="" (explicit empty) throws rather than
+   silently falling back; SENTRY_TRACES_SAMPLE_RATE clamps to [0, 1].
+5. **Error reporting** (1 test). Message starts with the exact prefix
+   `"Invalid environment configuration:"`, then `\n  <FIELD>: <msg>`
+   per issue. Stable shape downstream tooling could rely on.
+6. **Singleton caching** (3 tests). `loadEnv()` returns the same object
+   reference twice; subsequent mutations to `process.env` are ignored
+   until `_resetEnvCacheForTests()` resets the cache.
+
+Also kept the original `parses AI_SEEDING_ENABLED string truthy values`
+test for continuity.
+
+Refactored the test file to use a single `withEnv()` helper that
+snapshots `process.env`, applies overrides, resets the loadEnv cache,
+runs the body in `try`, and restores everything in `finally` —
+prevents any one case from leaking env into the next test file
+(important because vitest runs files in parallel workers but cases
+within a file share `process.env`).
+
+**Verification.** `npm run lint`, `npm run build`, and `npm test` all
+green. Test count: 531 → 561 (+30 net; the file's two original tests
+remain). Suite stays under 7s.
+
+**What's blocked on the user.** Same as prior runs — Twilio account
++ 10DLC registration, domain, deploy. All listed in `USER_TODO.md`.
+And: this hourly routine is still firing. The build IS complete;
+disabling the routine is a one-click action for the human.
+
+**For the next agent.** Routine likely still fires. Continuing
+candidates if seam-hunting:
+- `src/lib/logger.ts` — pino transport selection on NODE_ENV;
+  no test pins the dev `pino-pretty` vs prod JSON contract.
+- `src/safety/profanity.ts` (if it exists) — check coverage of the
+  word list / leetspeak handling.
+- `src/scheduler/runDailyMatch.ts` — partial pins exist; check
+  whether the photo-MMS-on-reveal path has a contract pin yet.
+- `src/twilio/routes.ts` is large (~600+ lines) — likely has
+  unpinned branches in the conversation state machine.
+Keep commits small, one seam per commit, descriptive messages.
+
+---
+
 ## 2026-06-04T23:08Z — Contract pins for AI persona client + factory
 
 **Run state.** GOAL.md still 100% checked; `BUILD_COMPLETE` still valid.
