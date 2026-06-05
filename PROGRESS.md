@@ -2,6 +2,100 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-05T17:13Z — Contract pin for `matching/scoring.ts` (WEIGHTS sum, symmetry, tolerance boundaries)
+
+**Context.** `BUILD_COMPLETE` present, GOAL.md fully checked, container's
+`main` matched `origin/main` at clone after a `git fetch`. Continuing the
+prior agents' pattern: skip empty-commit no-op runs unless I find a
+genuine seam, and pin it. Test suite before this run: 577/577 across 39
+files. The scoring module had a behavioural test file
+(`tests/matching/scoring.test.ts`) but it never pinned the load-bearing
+INVARIANTS — only sample points. Three of those invariants are exactly
+the kind of thing a refactor can break silently.
+
+**The gap.** `src/matching/scoring.ts` exposes `scoreCompatibility(a, b)`
+— pure function, 4 weighted components (age, height, profession,
+typeDescriptor). The existing tests cover behaviour at sample points
+(specific pair scores, "rejects self-pairing", "rejects gender
+mismatch"). But none of them pin:
+
+1. **WEIGHTS sum to 1.0.** Internal weights are
+   `{age: 0.25, height: 0.2, profession: 0.2, typeDescriptor: 0.35}`.
+   Sum 1.0 is what makes the documented `score ∈ [0, 1]` guarantee
+   trustworthy — anything else and `clamp01` either truncates (`>1`)
+   or caps max-possible below 1 (`<1`). A refactor adding a new
+   component without rebalancing would slip past every existing test
+   because they only check **relative** orderings (`great > meh`) and
+   loose bounds (`score > 0.55`).
+2. **Symmetry: `scoreCompatibility(a, b) === scoreCompatibility(b, a)`.**
+   Documented behaviour (each subscore is `(AB + BA) / 2`). A refactor
+   that drops one direction (an easy mistake — the hard-gate already
+   does `aWantsB` / `bWantsA` separately) would silently bias every
+   match without breaking any sample-point test.
+3. **Age tolerance is exactly 3 years at the boundary; height is
+   exactly 10 cm.** The existing tests check ONE mid-range value each
+   ("2y over → ~0.667", "out of range → 0"); the boundary (exact 3
+   years over) and a different inside-tolerance value (1y under) are
+   unpinned. A refactor changing the tolerance to 2/5/etc. would only
+   shift boundary cases — the existing tests' loose bounds (`< 1`,
+   `> 0.5`) would still pass.
+4. **Ineligible-state shape.** Existing tests check `score === 0` but
+   not the zeroed `.components` quartet or `reasons.length >= 1`. A
+   refactor that returns `ineligible: true` without populating reasons
+   would break downstream admin debug logs that pattern-match
+   "self-pairing" / "gender mismatch".
+5. **Profession matching is exact (after trim + lowercase) — NOT
+   substring.** The source comment says "currently" exact; future
+   "let's fuzzy this" would silently change semantics. Pinned that
+   `["engineer"]` does NOT match `"software engineer"`.
+6. **`typeDescriptor` has THREE NEUTRAL paths**, not one. The
+   existing test only covers the empty-descriptor path. The other
+   two — descriptor that tokenises to nothing after stopword filter,
+   and other-side-tokenises-to-nothing — are unpinned.
+7. **`genderAllowed` branches.** Empty preferred list = open; partner
+   gender === null = permitted. Both flips would silently kill
+   matching for users mid-onboarding (most of cold-start).
+8. **Range invariants over varied inputs.** `score ∈ [0, 1]` and each
+   component `∈ [0, 1]` for several extreme inputs (extreme age gaps,
+   extreme height gaps, all-null both sides, lopsided one-empty pair).
+
+**Shipped.** `tests/matching/scoring.contract.test.ts` — 29 tests
+across 9 describe blocks. Two construction bugs caught and fixed
+during the first run (a typeDescriptor pair that I'd designed to hit
+jaccard=1 actually hit 5/6 because the OTHER user's profession was
+NOT in the first user's descriptor; reconstructed by including both
+profession words in the shared descriptor so descTokens === otherTokens
+in both directions. And an age-1y-under test where the candidate ages
+happened to BOTH land inside both ranges, killing the penalty — moved
+the "under" age to the side whose target prefs cover the 22 minimum).
+
+**Verified.**
+
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+- `npm test` — **606/606** across 40 files (6.59s), +29 from the new file
+- `npm run build` — clean
+
+**Why this isn't make-work.** The single most-dangerous regression in
+this file is a weight-sum drift — it's a one-line edit, slips past
+every relative-comparison test in the suite, and silently makes every
+score either compressed or saturated. Symmetry is the second — a
+half-direction refactor would silently and uniformly bias matches.
+Neither is observable from the existing tests. The boundary-pinning
+tests (3y / 10 cm) also catch a quiet tolerance change, which is the
+sort of thing a "let's relax matching for cold-start density" sprint
+might do casually.
+
+**State.** GOAL.md still fully checked; `BUILD_COMPLETE` still valid.
+Human blockers (entity, Twilio + 10DLC, domain, deploy) still in
+`USER_TODO.md`. The hourly routine still fires; only the human can
+disable it. Standing advice for next agent: no empty commits, hunt
+for a real seam. Reminder from prior runs: the container's local
+`origin/main` reads as "up to date" even when the remote has moved
+since clone — always `git fetch origin main` before trusting tracking
+refs.
+
+
 ## 2026-06-05T16:12Z — Contract pin for `attachFastifySentry` (the prod error-reporting hook)
 
 **Context.** `BUILD_COMPLETE` present, GOAL.md fully checked. `main` in
