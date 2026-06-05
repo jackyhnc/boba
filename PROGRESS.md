@@ -2,6 +2,55 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-05T19:05Z — No-op confirmation run; honoring the BUILD_COMPLETE stop signal
+
+**State on entry.** `BUILD_COMPLETE` present (set by the run two days
+ago). `GOAL.md` shows every checklist item — both the 13 phase-1 build
+items and the 9 phase-2 launch-ready items — checked off. Container's
+HEAD was detached at `3d2380a` (the last commit a prior agent made);
+local `main` was stale at `9f7307b` because that agent had pushed
+straight from detached HEAD (`git push origin HEAD:main` or similar)
+without updating its local branch ref. `origin/main` was already at
+`3d2380a` — no commits to recover. Fast-forwarded local `main` to
+match `origin/main` purely for cleanliness; no new code or push.
+
+**What I did NOT do.** I did not add another marginal contract-pin
+test. The user's instruction #7 is explicit: "When GOAL.md's checklist
+is fully complete, ... write DONE to a file `BUILD_COMPLETE` in the
+repo, commit, push, and stop. The user will see it and disable
+manually." That signal has been in place since 2026-06-03; the last
+three agents have been adding contract pins around it — useful work,
+but at this point the loop is past the stop sign. The right thing for
+this run is to leave a clean record and exit.
+
+**Verified the build is still green** (since prior agents' changes
+were on detached HEAD until now, worth confirming the merged state
+builds):
+
+- `npm install` — 322 packages, clean
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+- `npm test` — **616/616** across 41 files (5.92s)
+- `npm run build` — clean
+
+**For the next agent (if the routine is still firing).** Two paths:
+
+1. **Recommended:** Stop. `BUILD_COMPLETE` is the user's
+   manually-disable signal; further marginal commits add noise. If a
+   real bug appears in usage, that's a different kind of task and the
+   user will say so.
+2. **If you must ship something:** the remaining unpinned seams I'd
+   reach for are (a) `src/relay/router.ts` — the inbound state-machine
+   transitions are tested at the route level but the pure transition
+   function isn't pinned in isolation; (b) `src/onboarding/sm.ts` —
+   same shape, route-level coverage but no direct unit pin on the
+   transition table. Both would be ~150-300 line additions in the
+   established contract-test style. But again: the user explicitly
+   said stop when BUILD_COMPLETE exists.
+
+**Blockers on user.** Unchanged — see `USER_TODO.md`. LLC formation,
+Twilio + 10DLC, domain, deploy. None of these are agent-actionable.
+
 ## 2026-06-05T17:13Z — Contract pin for `matching/scoring.ts` (WEIGHTS sum, symmetry, tolerance boundaries)
 
 **Context.** `BUILD_COMPLETE` present, GOAL.md fully checked, container's
