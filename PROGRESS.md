@@ -2,6 +2,113 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-05T16:12Z — Contract pin for `attachFastifySentry` (the prod error-reporting hook)
+
+**Context.** `BUILD_COMPLETE` present, GOAL.md fully checked. `main` in
+sync at clone, then fast-forwarded past the prior run's two commits.
+Continuing the standing pattern: no empty-commit no-ops, hunt for a real
+seam that callers depend on and that nothing pins yet.
+
+**The gap.** `src/observability/sentry.ts` exposes two functions:
+
+- `initSentry({env})` — sets `initialized = true` iff DSN present.
+  Already covered by `tests/observability/sentry.test.ts` (3 tests).
+- `attachFastifySentry(app)` — wires Fastify's `onError` hook into
+  Sentry. Wired into the prod boot at `src/app.ts:74`, runs before any
+  route is registered, and had **zero test coverage**. Six non-obvious
+  invariants live in that 10-line function and a quiet refactor would
+  break each one silently.
+
+**Shipped.** `tests/observability/attachFastifySentry.test.ts` — 15
+tests across 4 describe blocks, pinning:
+
+1. **No-op when not initialized.** Both code paths: `initSentry` never
+   called, AND `initSentry` called with empty DSN (returns `false`).
+   Errors still flow through Fastify's normal 500 path; `captureException`
+   is not invoked even once. Without this pin, a refactor that always
+   registered the hook would silently ship captures to an `init`-less
+   client in prod.
+2. **`path` tag = `routeOptions.url`, NOT `req.url`.** This is the key
+   Sentry-grouping pin. Asserts `/users/:id` (the route pattern) for a
+   request to `/users/42`, with a NEGATIVE assertion that `42` does not
+   appear in the tag value. A refactor swapping the `??` operands would
+   shatter one bug into N issues per id in Sentry's UI.
+3. **Querystring negative pin.** For `/boom?x=1&y=2`, the tag is `/boom`
+   — no `?` survives. Pins the routeOptions preference even when both
+   sides are populated.
+4. **`method` is a SCOPE EXTRA, not a TAG.** Tags are Sentry's indexed,
+   cardinality-bounded surface; methods belong in extras. Negative pin
+   asserts `tags.method === undefined`.
+5. **`path` is a TAG, not an EXTRA.** Symmetric pin so a refactor
+   flipping the two doesn't slip through.
+6. **Scope surface is EXACTLY `{tags: ["path"], extras: ["method"]}`.**
+   Catches any future field that started leaking in (requestId, body,
+   ip). If a field WANTS to be added, this test is the place to update.
+7. **Original error reference passes through.** Throws a sentinel Error
+   with a custom `code` property, asserts `toBe(sentinel)` referentially
+   plus `code === "SENTINEL_CODE"`. Pins against a "normalize" refactor
+   like `captureException(new Error(err.message))` that would lose stack
+   fidelity and the `code` field.
+8. **withScope isolation across errors.** Two consecutive errors to
+   `/alpha` and `/beta` produce two captures whose `tags.path` are
+   `/alpha` and `/beta` respectively, AND the tag map keys are
+   `["path"]` only — pins that no cross-request bleed happens.
+9. **`captureException` runs INSIDE `withScope`.** The mock's scope
+   snapshot would be empty if it didn't. Catches a refactor that hoisted
+   the captureException call out of the scope callback (resulting in
+   silently untagged events).
+10. **Only handler errors capture.** Successful 200s produce zero
+    captures; the next error still does.
+11. **Reply contract unchanged.** Asserts the response is still
+    Fastify's default 500 JSON (`{statusCode: 500, error: "Internal
+    Server Error", message: ...}`), AND we still captured. Pins that the
+    hook observes without intercepting.
+12. **Multi-method on same pattern.** GET + POST to `/users/:id` both
+    tag `path=/users/:id`, distinguished only by `extras.method` —
+    exactly how Sentry's issue grouping works.
+
+The mock for `@sentry/node` snapshots the scope state at the moment
+`captureException` is invoked (not just call counts), so assertions can
+distinguish "tag was set but inside the wrong scope" from "tag wasn't
+set at all". That's what makes the inside-vs-outside `withScope` pin
+observable.
+
+**Verified.**
+
+- `npm test` — **577/577** across 39 files (5.78s); +15 from this file
+  (baseline was 562/38)
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+- `npm run build` — clean
+
+**Why this isn't make-work.** Two of the highest-blast-radius regressions
+in this 10-line function would be invisible to every other test:
+shipping captures to a never-init'd Sentry client (no-op-when-uninit
+pin), and shattering Sentry issue grouping by tagging `req.url` instead
+of `routeOptions.url`. The second one would only show up as "why does
+Sentry have 4000 distinct issues for one bug" weeks later. Both were
+unpinned until now.
+
+**State.** GOAL.md still fully checked; `BUILD_COMPLETE` still valid.
+Human blockers (entity, Twilio + 10DLC, domain, deploy) still in
+`USER_TODO.md`. The hourly routine still fires; only the human can
+disable it.
+
+**For the next agent.** Standing advice continues: no empty commits,
+hunt for a real seam. `git fetch origin main` before trusting tracking
+refs (the container's `origin/main` is stale at clone). Two unpinned
+seams I noticed but did not get to this run, ranked by impact:
+
+- `src/lib/prisma.ts` and the global `prisma` export — verify it's a
+  PrismaClient singleton (not re-instantiated per import) and that
+  `prisma.$disconnect` is wired into a process-shutdown hook. A
+  per-import client would silently leak connections in tests that import
+  it.
+- `src/scheduler/cron.ts` (or wherever `startScheduler` lives) — pin the
+  cron expression default `0 21 * * *` (9pm UTC = 5pm ET), and that
+  `stopScheduler` is idempotent and tolerates being called on a
+  never-started handle. The app's `onClose` hook depends on the latter.
+
 ## 2026-06-05T07:10Z — External-contract pin for Twilio signature (published reference vector)
 
 **Run state.** `BUILD_COMPLETE` still valid; GOAL.md still 100% checked.
