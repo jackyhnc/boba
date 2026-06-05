@@ -2685,3 +2685,101 @@ advice for next agent: no empty commits, hunt for a real seam. Reminder
 from prior runs: the container's local `origin/main` reads as "up to date"
 even when the remote has moved since clone — always `git fetch origin
 main` before trusting tracking refs (see commit `ec8141c`).
+
+---
+
+## 2026-06-05 18:07 UTC — contract pins for rematch Prisma helpers
+
+**Context.** GOAL.md fully checked, `BUILD_COMPLETE` still valid, HEAD
+in sync with `origin/main` at `e822048` after `git fetch origin main`.
+Previous run shipped contract pins for matching/scoring; this run
+continues the "hunt for a real seam" cadence rather than no-op'ing.
+
+**Seam.** `tests/rematch/eligibility.test.ts` covers
+`loadPairHistoryFor` and `loadHistoryForPair` for round-trip behaviour
+but uses a fake DB whose `findMany` ignores its `where`/`select` args
+entirely (returns the row array regardless) and whose `findUnique`
+iterates the same array. That fake measures the right output for the
+right *call shape* but says nothing about the call shape itself. So
+the following could be regressed silently:
+
+1. The module's stated design choice — ONE bulk `findMany` over
+   `OR(userAId IN ids, userBId IN ids)`, not C(n,2) per-pair lookups —
+   could be reverted to N+1 `findUnique` calls and nothing in the
+   suite would fail.
+2. Dropping the `userBId IN ids` half of the OR (asymmetry trap, since
+   the canonical A<B ordering has no relation to which user the cohort
+   passed) would silently halve the recovered history.
+3. `select` over-fetch (e.g. accidentally pulling the `User` relation
+   or `createdAt`/`id`) would bloat result sets at prod scale.
+4. The empty-input short-circuit could be dropped — `findMany` would
+   still return `[]` from Postgres for `in: []`, just with a wasted
+   round-trip.
+5. `loadHistoryForPair` switching from `findUnique` on the compound
+   `userAId_userBId` unique index to `findFirst` would silently
+   full-scan the table.
+6. Either helper dropping `orderPair` canonicalization before the DB
+   call would miss rows for callers that pass `(B, A)` — currently the
+   existing test "agrees" only because the fake iterates a row array.
+
+**Shipped.** `tests/rematch/prismaContract.test.ts` — 10 tests across
+two describe blocks, all green. Strategy: replace the fake DB with
+`vi.fn()` spies that capture the actual `where`/`select` args passed
+to Prisma, then assert exact shapes via deep-equal plus
+`Object.keys(...).sort()` for the projection-closure check (catches
+silent additions, not just removals).
+
+Notable assertions worth calling out:
+
+- `findMany` called exactly once, `findUnique` never, for a 5-user
+  cohort — pins the no-N+1 design.
+- `where` deep-equals
+  `{ OR: [{ userAId: { in: ids } }, { userBId: { in: ids } }] }`
+  — pins both halves of the OR.
+- `select` for `loadPairHistoryFor` deep-equals the 5-field projection
+  (userAId, userBId, lastMatchedAt, matchCount, hasDiscard); for
+  `loadHistoryForPair`, the 3-field projection (no echo of pair ids).
+- Empty input → no DB call at all (`findMany`/`findUnique` both
+  un-invoked).
+- Denormalized row (userAId="u2", userBId="u1") still maps to
+  canonical `pairKey("u1","u2")`, never `"u2|u1"`.
+- `loadHistoryForPair` called with reversed input `(u2, u1)` issues
+  `findUnique` with `where.userAId_userBId.userAId === "u1"` —
+  asserting against the *captured Prisma args*, not just the returned
+  entry (which is what eligibility.test.ts pins).
+- `lastMatchedAt` (Date) → `lastMatchedOn` (date-key string
+  "YYYY-MM-DD") propagation, using a late-evening UTC fixture to
+  exercise the truncation.
+
+**Verified.**
+
+- `npm install` — fresh `node_modules` (container starts clean).
+- `npm run typecheck` — clean. One round-trip: had to widen the spy
+  signature to `(args: unknown)` and cast the captured `mock.calls`
+  via `as unknown as { ... }` so the same spy could be inspected for
+  `where` in some tests and `select` in others without per-method
+  strong typing.
+- `npm run lint` — clean.
+- `npm test` — **616/616** across 41 test files (5.85s), +10 from the
+  new file.
+- `npm run build` — clean.
+
+**Why this isn't make-work.** Compare to the eligibility tests' fake
+DB: a refactor that changed `loadPairHistoryFor` to
+`for (const pair of pairs) await prisma.rematchHistory.findUnique(...)`
+would pass every existing test (the fake's `findUnique` finds the row,
+so the returned map is correct) but would N+1 against Postgres at the
+cohort sizes we're building toward. The new spies are what make that
+observable. Same story for dropping half the `OR` (the fake doesn't
+filter on `where`), changing `select` (the fake doesn't project), or
+losing `orderPair` (the fake matches on the stored values directly).
+
+**State.** GOAL.md still fully checked; `BUILD_COMPLETE` still valid;
+human blockers (entity, Twilio + 10DLC, domain, deploy) still tracked
+in `USER_TODO.md`. Hourly routine still fires; only the human can
+disable it. Standing advice continues: no empty commits, hunt for a
+real seam. Reminder from prior runs: container's local `origin/main`
+reads as "up to date" even when the remote has moved since clone —
+always `git fetch origin main` before trusting tracking refs (today's
+fetch revealed origin had advanced from `9f7307b` to `e822048` since
+container start).
