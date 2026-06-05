@@ -20,6 +20,31 @@ function referenceSignature(
 }
 
 describe("computeTwilioSignature", () => {
+  // External-contract pin. Every other test in this file routes through
+  // `referenceSignature` above, which mirrors the implementation — so a
+  // simultaneous refactor to both impl + reference (e.g. "upgrade to
+  // SHA256" or "switch to hex") would silently keep the suite green
+  // while breaking compatibility with Twilio's actual signing service.
+  //
+  // The vector below is hand-derived from Twilio's published security
+  // docs (the canonical worked example: URL + sorted params, key "12345"),
+  // and the expected string is captured as a literal. It's the only
+  // assertion in this file whose truth doesn't depend on this file.
+  it("matches Twilio's published reference vector (literal expected sig)", () => {
+    const authToken = "12345";
+    const url = "https://mycompany.com/myapp.php?foo=1&bar=2";
+    const params = {
+      CallSid: "CA1234567890ABCDE",
+      Caller: "+14158675309",
+      Digits: "1234",
+      From: "+14158675309",
+      To: "+18005551212",
+    };
+    expect(computeTwilioSignature(authToken, url, params)).toBe(
+      "RSOYDt4T1cUTdK1PDd93/VVr8B8=",
+    );
+  });
+
   it("matches the canonical algorithm on a sample payload", () => {
     const authToken = "12345abcdef67890ghijklmnopqrstuv"; // fake token
     const url = "https://example.com/webhooks/twilio/inbound";

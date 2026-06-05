@@ -2,6 +2,80 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-05T07:10Z — External-contract pin for Twilio signature (published reference vector)
+
+**Run state.** `BUILD_COMPLETE` still valid; GOAL.md still 100% checked.
+Fresh container — `npm install` ran cleanly (321 packages), then
+`npm run typecheck && npm run lint && npm run build && npm test`
+was green at 561/561 across 38 files. Container's local HEAD was
+exactly at `origin/main` (4a95c52) after `git fetch origin main`.
+Continuing the prior agents' "hunt for a real seam" rather than
+no-op commits.
+
+**The gap.** `tests/twilio/signature.test.ts` has 11 tests, but **every
+non-trivial assertion routes through a co-located `referenceSignature`
+helper** that mirrors the implementation: same `createHmac("sha1", t)`,
+same `update(data, "utf8")`, same `.digest("base64")`. The matrix
+covers algorithm correctness, sort stability, byte sensitivity,
+array-valued params, wrong-token / missing-header / wrong-length
+rejection — all good, but all *internally self-consistent*.
+
+The seam this leaves open: a **simultaneous refactor** that mutates
+both the implementation AND the test's `referenceSignature` helper —
+e.g. "let's upgrade SHA1 → SHA256 for better security", or "switch
+the digest from base64 to hex to make logs readable", or "drop the
+utf8 encoding hint, Node defaults to utf8 anyway". All three of those
+edits are diff-local and a casual reviewer would let them through;
+all three would silently break compatibility with Twilio's actual
+signing service (which is fixed by Twilio's webhooks API), turning
+every inbound webhook into a 403 in prod.
+
+**Shipped.** One new test at the top of the `computeTwilioSignature`
+describe block: `matches Twilio's published reference vector (literal
+expected sig)`. Uses the canonical worked example from Twilio's
+webhooks-security docs:
+
+- URL: `https://mycompany.com/myapp.php?foo=1&bar=2`
+- params: `{CallSid, Caller, Digits, From, To}` (the exact 5 from
+  the docs vector)
+- authToken: `"12345"`
+- expected: literal string `"RSOYDt4T1cUTdK1PDd93/VVr8B8="`
+
+The expected sig is a **string literal**, not a value re-computed
+inside the test, so this assertion's truth doesn't depend on any
+other line in `signature.test.ts`. If a future refactor changes
+algorithm / encoding / key handling / utf8 handling / sort semantics,
+this one test fails even if every other test (and the file's
+`referenceSignature` helper) was edited in lockstep with the impl.
+Verified by computing it independently in Node before pinning.
+
+**Verified.**
+
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+- `npm run build` — clean
+- `npm test` — **562/562** across 38 files (+1 from this run)
+
+**Why this isn't make-work.** Every other test in `signature.test.ts`
+would pass after a coordinated `sha1 → sha256` swap (or `base64 →
+hex`, or `utf8 → ascii`). The new test wouldn't, because Twilio's
+servers wouldn't either — it's the only assertion in this file that
+pins against the external contract Twilio actually enforces. The
+signature check is the security boundary for the inbound SMS webhook;
+a silent regression here turns every match-day text into a 403.
+
+**State.** GOAL.md still fully checked; `BUILD_COMPLETE` still valid.
+Human blockers (LLC/entity, Twilio account + 10DLC, domain, deploy)
+still in `USER_TODO.md`. The hourly routine still fires; only the
+human can disable it. Reminder from prior runs: the container's local
+`origin/main` reads as "up to date" even when remote has moved since
+clone — always `git fetch origin main` before trusting tracking refs
+(see `ec8141c`). Standing advice for next agent: no empty commits,
+hunt for a real seam, prefer pins that lock the EXTERNAL contract
+over pins that lock internal self-consistency.
+
+---
+
 ## 2026-06-05T06:11Z — Contract pins for env config (boolean flag asymmetry, validation, caching)
 
 **Run state.** GOAL.md still 100% checked; `BUILD_COMPLETE` still valid;
