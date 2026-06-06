@@ -2,6 +2,119 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-06 ~22:09 UTC — contract pins for twilio/conversation.ts (the inbound router)
+
+Hourly fire. `BUILD_COMPLETE` = `DONE` is still in force, but per the
+standing playbook from prior runs the highest-leverage remaining work
+is *contract pins* against modules whose only test coverage is
+behavioural. Previous agent named `src/twilio/conversation.ts` as
+the top target. Shipped that.
+
+**What landed.** `tests/twilio/conversationContract.test.ts` — 37
+structural pins across 10 describe blocks. They cover invariants the
+behavioural sibling test doesn't lock:
+
+1. **Precedence ordering.** The router checks SMS-compliance keyword
+   FIRST, then opt-out drop, then unknown-sender, then the status
+   switch (BANNED → PAUSED → ONBOARDING → ACTIVE), then REPORT, then
+   decision keyword, then normal relay. The five precedence pins
+   build cases where the wrong ordering would silently swap paths:
+   STOP-from-BANNED (keyword > status), HELP-from-PAUSED, STOP from
+   already-opted-out (keyword > opt-out gate), unknown-sender doesn't
+   trip the opt-out gate, REPORT > relay, decision > relay-and-
+   milestone. A refactor that hoists status into the priority chain
+   above the keyword check would fail 10DLC compliance silently —
+   pinned here.
+2. **`RouteResult` shape per path.** Twelve pins cover the null-vs-
+   populated table for `persistInbound`, `decisionToRecord`,
+   `moderation`, `aiReplyToGenerate`, `smsOptOutChange`,
+   `onboardingAdvance`, `milestonesToRecord`. Uses a `stripOutbounds`
+   helper so non-outbound fields are compared as a single object
+   (catches a refactor that flips e.g. `persistInbound` to an empty
+   row instead of `null` for the REPORT path).
+3. **OutboundAction.kind enumeration.** One pin enumerates every
+   `kind` the router can emit by exercising real scenarios; the
+   `expect(observed).toEqual(new Set([…]))` line is exhaustive.
+   Documents why `banned_silent` and `face_reveal` are declared but
+   unreachable from this module (the latter is emitted by the
+   end-of-day flow in `src/decisions/flow.ts`).
+4. **Hard-flag depth zeroing.** Pins `depthScore === 0` *exactly*,
+   not just "low". A refactor that softens the anti-stat-fishing
+   brake to e.g. `depth / 4` would still let a long fishing message
+   accelerate unlocks; the strict 0 catches that.
+5. **Hard-flag relay body shape.** Splits on `\n` and asserts the
+   warning is on line 1 and the original body is on line 2 verbatim.
+   Pins single-category names the category (`name`), multi-category
+   collapses to generic `personal info` (not joined with commas — we
+   don't ship detector internals to users).
+6. **Milestone reveal shape.** Exactly two `milestone_reveal`
+   outbounds per cross, one per phone, `fromUserId === null` on both,
+   `matchId === active.id` on both. Reveal body retains the
+   `{{age}}` placeholder — substitution is the IO layer's job
+   because the router has no access to the partner's Stats row.
+7. **`renderRevealBody` exhaustive over `MilestoneType`.** AGE,
+   PROFESSION, HEIGHT, FACE — all four branches. Pins the em-dash
+   (U+2014) for missing stats (not hyphen — would visually conflate
+   with phone-number separators in delivered SMS). Pin: no `{{`
+   remains in the rendered body (i.e. substitution actually
+   happened).
+8. **STOP-from-unknown-sender directive shape.** The ack fires but
+   `smsOptOutChange` is null (no `userId` to flip). Conversely
+   START-from-not-opted-out STILL emits the directive (idempotency
+   contract: handlers don't short-circuit on existing state — keeps
+   the audit trail intact).
+9. **`OutboundAction` id semantics.** Relay outbound has
+   `fromUserId = sender`, `toUserId = partner`, `isRelay = true`,
+   `matchId` set; system reply (decision_ack) has
+   `fromUserId = null`, `isRelay = false`, `matchId` set;
+   unknown_sender_intro has BOTH ids null, `matchId` null.
+10. **`COPY` invariant keywords.** `unknownSenderIntro` names
+    `JOIN`; `paused` names `RESUME`; reveal templates use
+    `{{age}}` / `{{profession}}` / `{{heightCm}}` mustaches (not
+    `%s`, not `${}`). A copy edit that drops `JOIN` would brick the
+    onboarding entry — user wouldn't know the magic word.
+
+**Verification.** `npm test` 772/772 pass (was 735 before — the
+file adds 37 tests). `npm run build` clean. Working tree was on a
+detached HEAD at `2c316da` (last hour's commit); fetched
+`origin/main`, checked out `main` (was 16 behind clone state),
+fast-forwarded to `origin/main`, then committed on top. Untracked
+test file survived `git reset --hard` (only affects tracked files).
+
+**Trap I almost stepped in (and didn't).** First draft of the
+"every kind we emit" enumeration included `banned_silent` and
+`face_reveal` in the expected set. Re-reading the router: BANNED
+returns an empty outbound list (no `banned_silent` is ever
+constructed), and FACE reveal is emitted by
+`src/decisions/flow.ts` at end-of-day, not by `route()`. Updated
+the expected set + added a comment documenting why those two are
+excluded — keeps a future agent from "fixing" the test by adding
+an emission path inside the router.
+
+**Modules still without structural contract pins.** Same priority
+list as last run, minus `twilio/conversation.ts` (now done):
+
+1. `src/twilio/routes.ts` — webhook surface. Signature-verify
+   ordering (must run BEFORE body parse), 200-always-for-Twilio
+   semantics, TwiML response shape. Highest leverage now.
+2. `src/decisions/flow.ts` — end-of-day resolution table. The
+   3×3 keep/maybe/discard matrix benefits from an exhaustive
+   structural pin. There's a `contract.test.ts` sibling already —
+   check what's covered before duplicating.
+3. `src/safety/moderation.ts` — profanity/harassment stubs. The
+   category labels are the contract (downstream metrics + report
+   schema key on them).
+4. `src/matching/selector.ts` — selection invariants (no
+   self-pair, no-repeat-except-rematch, deterministic-given-seed).
+5. `src/milestones/depth.ts` — depth-signal scoring formula
+   (length weight, question-ratio coefficient, clamping).
+6. `src/invites/code.ts` — code generation alphabet, length,
+   collision-rejection contract.
+
+Don't go after this mechanically — re-evaluate the seam each run.
+If a refactor lands that moves modules around, the priorities
+shift.
+
 ## 2026-06-06 ~20:03 UTC — hourly no-op; BUILD_COMPLETE still in force
 
 Routine fired. Pre-run checks:
