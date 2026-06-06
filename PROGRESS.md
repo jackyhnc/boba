@@ -2,6 +2,140 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-06 ~15:09 UTC — contract pins for the onboarding state machine
+
+`BUILD_COMPLETE` still in force; GOAL.md still fully checked. Hourly
+routine continues until the human disables it. Used the slot to land
+another structural seam instead of a no-op commit.
+
+**Target:** `src/onboarding/flow.ts` + `src/onboarding/types.ts`.
+The existing `tests/onboarding/flow.test.ts` pins each parser's
+input/output behaviour and a couple of entry/terminal anchors, but
+several structural invariants of the state machine itself were
+unguarded:
+
+1. **STEP_PARSERS exhaustively covers every non-pseudo step.** If
+   a new step is added to `STEP_ORDER` without a parser entry, the
+   first inbound landing on it throws
+   `Cannot read properties of undefined (reading 'parse')` at
+   runtime. Pinned by walking every real step in STEP_ORDER and
+   confirming a valid input advances; this doesn't depend on the
+   un-exported STEP_PARSERS table, so it survives a rename.
+
+2. **`welcome` and `done` are the ONLY pseudo-steps.** They're
+   handled inline by `advance` before the parser table is
+   consulted. Pin the set so a third pseudo-step has to update both
+   the switch *and* this pin.
+
+3. **STEP_IDS === STEP_ORDER.** STEP_ORDER is exported as the
+   linkage source for `nextStepAfter`. The type system doesn't
+   catch divergence; the machine would silently skip steps.
+
+4. **A full success walk visits each real step exactly once and
+   terminates at "done".** The hardest pin to fake — replays the
+   production path end-to-end with the minimal valid input per
+   step and checks `nextStep === STEP_ORDER[i+1]` at every hop.
+
+5. **`markActive` ⇔ `nextStep === "done"`.** Walked across every
+   reachable state (entry, pass-through, every-step success,
+   every-step failure, already-done). The seam: someone could
+   accidentally flip a user to ACTIVE mid-flow by setting
+   markActive on the "ask_campus_email_domain" success branch
+   directly (instead of relying on the `next === "done"`
+   conditional), and no existing test would catch it before
+   onboarded-only invariants started leaking into the daily
+   match selector.
+
+6. **`mergeUpdates` shallow-merges per nested slot.** The relay
+   layer composes updates; a naive "improvement" replacing the
+   whole slot would wipe earlier answers when a new field came in.
+   Pinned the multi-key survival case across `user`, `stats`, and
+   `preferences`.
+
+7. **`mergeUpdates` always returns all three slots as objects.**
+   `null` vs `{}` vs `undefined` matters to the persister's
+   `slot && Object.keys(slot).length > 0` check. Pinned with
+   empty-input fixtures.
+
+8. **`mergeUpdates` intentionally drops `inviteCodeToRedeem`.**
+   The directive is consumed by routes.ts immediately and
+   explicitly deleted before persistOnboardingUpdates runs. If
+   mergeUpdates carried it forward, a follow-up merge cycle could
+   resurrect it and double-redeem the code. This is the easiest
+   one for a "thorough refactor" to silently break — pin makes
+   the drop intentional.
+
+9. **Failed parse keeps cursor on currentStep, empty updates,
+   markActive=false.** Pinned across every real step so a refactor
+   that changes failure handling for one slot is caught.
+
+10. **`ask_invite_code` pass-through (invites disabled) ignores
+    body content.** Null / empty / garbage / a valid-looking code
+    all advance the same. The unstuck-me valve when the env flag
+    flips mid-flow.
+
+11. **`done` cursor is idempotent.** Any subsequent body keeps
+    the cursor at `done`, returns the done copy, keeps
+    markActive=true, never writes fields. Prevents accidental
+    re-entry into onboarding from a stray inbound (e.g. a `HELP`
+    that lands before the carrier keyword handler runs).
+
+**Shipped.** `tests/onboarding/flowContract.test.ts` — 12 tests
+across 8 describe blocks, all green. Strategy:
+
+- Pulled `REAL_STEPS = STEP_ORDER.filter(s => !PSEUDO_STEPS.includes(s))`
+  so the walk is driven by the source of truth. A new step added to
+  STEP_ORDER is automatically picked up by the coverage pin without
+  edits here — but the per-step `VALID_INPUT` / `INVALID_INPUT`
+  fixtures would need a matching entry, so the absence is loud.
+- Used `keyof typeof VALID_INPUT` to keep the fixture lookup
+  type-safe — the cast through `as keyof typeof VALID_INPUT` is
+  intentional because TS can't narrow `StepId` against the fixture
+  object's keys without a static map.
+- The full-walk test does `expect(expectedNext, ...).toBeDefined()`
+  before comparing — strict TS flags `STEP_ORDER[i+1]` as possibly
+  undefined, and the existence assertion documents that the array
+  must remain closed under nextStepAfter (last real step + 1 lands
+  on "done", which is in-bounds).
+- The markActive invariant test enumerates every interesting case
+  (entry × invite-config matrix, pass-through, success/failure for
+  every real step, already-done) and bulk-asserts `markActive ===
+  (nextStep === "done")` with a per-case label for debuggability.
+
+**Verified.**
+
+- `npm install` — fresh `node_modules`.
+- `npm run typecheck` — clean.
+- `npm run lint` — clean.
+- `npm test` — **702/702** across 46 test files (6.15s), +12 from the
+  new file.
+- `npm run build` — clean.
+
+**Why this isn't make-work.** The `mergeUpdates` invariants are the
+scariest set. The function looks innocuous — three nested spreads —
+and there's a real temptation for a "tidy this up" refactor to use
+a generic deep-merge helper or to spread top-level fields too. The
+invite-code drop is silent: a refactor that adds `inviteCodeToRedeem`
+back to the merged result still passes every existing test, but
+introduces a real double-redemption bug the first time the relay
+layer merges accumulated updates. The markActive ⇔ "done" walk is
+nearly as load-bearing: the daily-match selector and invite-gated
+rollouts both depend on `status === ACTIVE` being a reliable signal
+that onboarding finished. Pinning the invariant across all reachable
+states means a refactor that adds an early-active branch (e.g. "mark
+active after photo upload") has to update this test or fail loudly.
+
+**State.** GOAL.md still fully checked; `BUILD_COMPLETE` still valid;
+human blockers (entity, Twilio + 10DLC, domain, deploy) still tracked
+in `USER_TODO.md`. Hourly routine still fires; only the human can
+disable it. Standing advice continues: no empty commits, hunt for a
+real seam. Next agent: candidates remaining for contract pins
+include `src/admin/routes.ts` (the run-match trigger + bulk-invite
+endpoints have only happy-path coverage) and `src/invites/code.ts`
+(generateCode uses crypto.randomInt — easy to "tidy" into
+Math.random with no test catching it; the ALPHABET length-32
+invariant feeds randomInt's range and is implicit).
+
 ## 2026-06-06 ~05:08 UTC — contract pins for the milestone unlock ladder
 
 `BUILD_COMPLETE` still in force; routine continues to fire hourly until
