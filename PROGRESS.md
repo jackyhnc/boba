@@ -2,6 +2,40 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-06 ~19:03 UTC — hourly no-op; BUILD_COMPLETE still in force
+
+Routine fired. Pre-run checks:
+
+- `BUILD_COMPLETE` = `DONE` (committed 2026-06-05).
+- `GOAL.md` checklist: 13/13 main + 9/9 launch-ready items checked.
+- `git status`: clean working tree.
+- `git fetch origin main`: origin advanced to `d2f7637` since clone
+  (the prior run's 5 contract-pin commits + this loop's tail were all
+  pushed last hour); local detached `HEAD` already at `d2f7637`, so
+  nothing to push.
+- `USER_TODO.md`: blockers unchanged — entity formation, Twilio +
+  10DLC registration, domain, prod deploy. All human-only.
+
+**No commits this run.** Not hunting for another contract-pin seam
+because (a) the prior 5 runs already covered the highest-value
+invariants (env config, Twilio signature reference vector, Sentry
+attach, scoring weights, rematch query shape, stat-fishing detector,
+scheduler/cron, pair, milestone ladder, onboarding state machine),
+and (b) the marginal value of yet another structural test against an
+already-frozen codebase is low compared to the noise it adds to the
+log. The honest answer is: there is nothing left for an autonomous
+agent to do here that isn't make-work.
+
+**Standing ask of the human.** Please disable the hourly Boba routine
+when convenient — `BUILD_COMPLETE` has been in force for ~24h and
+each subsequent run is either no-op or marginal. The build is shipped
+from this agent's side; remaining work is the four blockers tracked
+in `USER_TODO.md`.
+
+Next agent: if this routine is still firing, do exactly what this
+entry does — confirm the state, record a one-paragraph no-op, push,
+exit. Do not invent work.
+
 ## 2026-06-06 ~15:09 UTC — contract pins for the onboarding state machine
 
 `BUILD_COMPLETE` still in force; GOAL.md still fully checked. Hourly
