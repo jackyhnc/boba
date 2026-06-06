@@ -3460,3 +3460,166 @@ real seam. Reminder from prior runs: container's local `origin/main`
 reads as "up to date" even when remote has moved since clone — always
 `git fetch origin main` before trusting tracking refs (today's fetch
 revealed origin had advanced 9 commits from clone state).
+
+## 2026-06-06T21:08Z — contract pins for safety/smsKeywords (CTIA 10DLC compliance)
+
+**State.** GOAL.md still fully checked, `BUILD_COMPLETE` still in
+force, hourly routine still firing (only a human can disable it).
+Standing advice continues: no empty/no-op commits when a real seam
+exists. Today's seam: `src/safety/smsKeywords.ts` — the CTIA-keyword
+detector + the carrier-compliance reply copy. This is the module our
+10DLC vetting depends on; behavioural happy-path tests existed but
+the contract that 10DLC actually examines (exact reply bodies,
+strict first-token-only matching, no substring/prefix loosening of
+the canonical token sets) was not pinned.
+
+**What I picked.** A scan for `*Contract.test.ts` siblings showed
+the project's convention: every module with public surface area that
+external code (or external auditors) reads gets a sibling contract
+file. Modules already pinned: twilio/client, twilio/signature,
+twilio/prisma-deps, decisions, rematch, safety/statFishing,
+safety/recordReport, observability/attachFastifySentry, env config,
+ai/persona, matching/scoring, milestones/unlock, onboarding/flow,
+lib/pair, scheduler/cron, scheduler/runDailyMatch. Not yet pinned
+but substantive: `safety/smsKeywords`, `safety/moderation`,
+`safety/prisma-deps`, `milestones/depth`, `matching/selector`,
+`invites/code`, `admin/auth`, `admin/routes`, `twilio/conversation`,
+`twilio/routes`, `decisions/flow` (the contract test there covers
+something else), `ai/factory` (only the persona client is pinned).
+Of these, `safety/smsKeywords` is the highest-leverage to pin
+because:
+
+1. **Carriers literally read the reply strings during 10DLC
+   vetting.** A "minimise the copy" refactor that drops "Msg & data
+   rates may apply" or "Reply START to resume" can fail us out of
+   the registered campaign — and no behavioural test would catch a
+   single-word edit.
+2. **The detector's first-token-only rule is fragile.** The existing
+   suite tested "STOP texting me" → STOP and "please stop" → null,
+   but the underlying invariant (`split(/\s+/)[0]`) was not pinned.
+   Any refactor toward "look for STOP anywhere in the body, it's
+   nicer" would silently opt out users whose match said "stop being
+   so funny" and have no test break.
+3. **The punctuation-strip class is `[.,!?;:]+` suffix-only.** Three
+   plausible regressions sit here:
+   - changing the regex anchor from `$` to global would start
+     matching `".STOP"` (a leading-period typo) as STOP
+   - broadening the class to include `-` or `/` would make
+     `"STOP-now"` and `"STOP/HELP"` match
+   - applying the strip to the full body (not just the first token)
+     would change the cleaned token in subtle ways
+   None of these are covered by the existing test file.
+4. **Canonical token sets need a positive-and-negative pin.** The
+   existing suite has a positive list (`STOP, STOPALL, …`) but no
+   near-miss negative list. A refactor switching set lookup to
+   `.startsWith` would let `"STOPP"`, `"STOPPED"`, `"HELPME"`,
+   `"YESSIR"`, `"STARTING"` all silently start firing.
+5. **Internal Boba tokens (`KEEP / MAYBE / DISCARD / REPORT`) MUST
+   NOT be confused with compliance keywords.** If someone accidentally
+   folded them into the carrier-compliance path we'd send the
+   HELP_REPLY copy in response to end-of-day decisions. Worth an
+   explicit pin.
+
+**Shipped.** `tests/safety/smsKeywordsContract.test.ts` — 33 tests
+across 6 describe blocks, all green. Structure:
+
+- **result-shape contract** (5 tests): pins `Object.keys(r).sort()`
+  to `["keyword","token"]` exactly (no extra telemetry fields slip
+  in), `keyword === null ⟺ token === null` lockstep, token is the
+  cleaned-and-uppercased form (lowercase + punctuated input
+  exercises the strip-before-uppercase order), pure (equal input →
+  equal output object), and `keyword` is always a member of
+  `SmsKeyword | null`.
+- **tokenisation contract** (3 tests): first-token-only (positive
+  AND negative — "STOP because" → STOP, "please STOP" → null), the
+  `\s+` class (tab + newline + multi-space), and the
+  whitespace-/punctuation-only-body → null path (covers `"!!!"`,
+  `","`, `"..."` which all empty after strip).
+- **punctuation strip contract** (4 tests): the exact class
+  `[.,!?;:]+` (each member individually + repeated + greedy mixed),
+  suffix-only (rejects leading punctuation), no other symbols (`-`,
+  `*`, `/`, `)`, `#`), and first-token-only (trailing punctuation
+  on later words doesn't bleed in).
+- **canonical token sets** (5 `it.each` + 2 plain): every member of
+  STOP / HELP / START sets gets its own test (so the failure
+  message names which token regressed), a near-miss list pins
+  `.startsWith` regression, and the internal Boba tokens (KEEP /
+  MAYBE / DISCARD / REPORT) pin the do-not-confuse contract.
+- **compliance reply copy** (5 tests): the EXACT body of STOP_ACK,
+  HELP_REPLY, and START_ACK pinned via `toBe`. Plus the
+  "starts-with-Boba" rule (CTIA program-identifier requirement) and
+  a HELP_REPLY required-disclosures grouping that makes the failure
+  message immediately legible if a single piece changes (the
+  exact-body pin already catches it, but on its own you'd have to
+  diff strings).
+
+The exact-body pins are the most important assertion in the file —
+they're the only place in the repo where the 10DLC submission text
+is locked. If a future agent decides STOP_ACK is "too wordy" and
+trims it, this test breaks, the PR has to argue why we want to
+re-vet with carriers, and the change gets the scrutiny it deserves.
+
+**Verified.**
+- `npm install` — fresh `node_modules`, 321 packages.
+- `npm run typecheck` — clean.
+- `npm run lint` — clean.
+- `npm test` — **735/735** across 47 files (7.43s), +33 from the
+  new file (was 702/702).
+- `npm run build` — clean.
+
+**Why this isn't make-work.** Three of the asserted invariants
+would not be caught by the existing 21-test behavioural file:
+
+- A refactor that loosens `STOP_TOKENS.has(cleaned)` to
+  `.startsWith` would pass every existing test. The near-miss list
+  (`STOPP`, `STOPPED`, `HELPME`, `STARTING`) breaks it here.
+- A refactor that broadens the punctuation strip from `[.,!?;:]+`
+  to `[^\w]+` (which "looks cleaner") would change `"STOP-"` and
+  `"STOP/"` from null to STOP. The existing tests only check
+  `"STOP."` and `"STOP!"`, both of which still match. The
+  symbol-rejection tests here break the broadening.
+- A copy edit to STOP_ACK that drops "Reply START to resume" would
+  pass the existing soft-match regex (`/start/i`) because of
+  "Reply START to resume" → both match the regex. Only the `toBe`
+  pin catches the actual loss of the re-opt-in instruction.
+
+The first two would manifest only when a real user's match texted
+something matching the loosened pattern, and the third only when
+carriers next re-vet the campaign — i.e. all three are bugs that
+hide until they cost real money or a real account.
+
+**Working-tree note.** Container started on a detached HEAD at
+2cc096c (last "no-op" commit). Fetched origin/main (15 commits
+ahead of clone state — confirms the standing reminder about not
+trusting tracking refs after clone), checked out main, hard-reset
+to origin/main, then committed on top.
+
+**For the next agent.** Same standing advice: BUILD_COMPLETE is in
+force; only a human can disable the hourly trigger; prefer a real
+contract-pin seam over a no-op commit. Modules still unpinned and
+worth a future run, in rough order of impact:
+
+1. `src/twilio/conversation.ts` — the conversation state machine.
+   Highest-leverage remaining target. The behavioural test exists
+   but the state-transition table and the directive shape (what
+   gets emitted as outbound + what gets persisted) is the kind of
+   thing a refactor breaks silently.
+2. `src/twilio/routes.ts` — the webhook surface. Signature-verify
+   ordering (verify BEFORE parse), 200-always-for-twilio
+   semantics, TwiML response shape.
+3. `src/decisions/flow.ts` — end-of-day resolution table. The
+   3×3 keep/maybe/discard matrix is exactly the kind of thing that
+   benefits from an exhaustive structural pin (the `contract.test.ts`
+   sibling exists but covers something else; check before duplicating).
+4. `src/safety/moderation.ts` — profanity/harassment detection
+   stubs; the category labels are the contract.
+5. `src/matching/selector.ts` — the selection invariants (no
+   self-pair, no-repeat-except-rematch, deterministic-given-seed).
+6. `src/milestones/depth.ts` — the depth-signal scoring formula
+   pins (length weight, question-ratio coefficient, clamping).
+7. `src/invites/code.ts` — code generation alphabet, length, and
+   collision-rejection contract.
+
+Don't go after this list mechanically — re-evaluate the seam each
+run. If a refactor lands between now and the next firing that
+moves things around, the priorities shift.
