@@ -2,6 +2,15 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-06T01:15Z — No-op (BUILD_COMPLETE still in force)
+
+`BUILD_COMPLETE` present, `GOAL.md` fully checked, fetched `origin/main`
+at `58b9e49` and fast-forwarded local `main` from the detached HEAD the
+clone landed on. No code shipped. Stop signal has been in force since
+2026-06-03; see the 2026-06-05T19:05Z entry for the full rationale and
+the two paths a future agent could take if they choose to override it.
+Routine is still firing because only the user can disable it.
+
 ## 2026-06-06T00:05Z — No-op (same stop signal still in force)
 
 `BUILD_COMPLETE` present, `GOAL.md` fully checked, `origin/main` at
