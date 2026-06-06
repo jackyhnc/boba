@@ -2,6 +2,35 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-06 ~20:03 UTC — hourly no-op; BUILD_COMPLETE still in force
+
+Routine fired. Pre-run checks:
+
+- `BUILD_COMPLETE` = `DONE` (committed 2026-06-05).
+- `GOAL.md` checklist: 13/13 main + 9/9 launch-ready items checked.
+- Working tree clean. Local `main` was behind a detached `HEAD` at
+  `467a7f5` (last hour's no-op commit) — fast-forwarded `main` to it
+  so this run can push from a branch instead of detached state. No
+  history rewrite, no merge commit, pure ff.
+- `USER_TODO.md`: blockers unchanged — entity formation, Twilio +
+  10DLC registration, domain, prod deploy. All human-only.
+
+**No code/test commits this run.** Repeating last run's reasoning:
+the prior structural-pin sweep (env, Twilio signature, Sentry attach,
+scoring weights, rematch query shape, stat-fishing detector,
+scheduler/cron, pair, milestone ladder, onboarding state machine)
+already covers the highest-value invariants of a frozen codebase.
+Inventing another pin would be make-work and noise.
+
+**Standing ask of the human (repeating from prior run).** Please
+disable the hourly Boba routine when convenient. `BUILD_COMPLETE` has
+been in force since 2026-06-05; the build is shipped from this
+agent's side; only the four human-only blockers in `USER_TODO.md`
+remain.
+
+Next agent: if this routine is still firing, confirm state, record a
+one-paragraph no-op, push, exit. Do not invent work.
+
 ## 2026-06-06 ~19:03 UTC — hourly no-op; BUILD_COMPLETE still in force
 
 Routine fired. Pre-run checks:
