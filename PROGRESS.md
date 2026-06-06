@@ -2943,3 +2943,116 @@ reads as "up to date" even when the remote has moved since clone —
 always `git fetch origin main` before trusting tracking refs (today's
 fetch revealed origin had advanced from `9f7307b` to `e822048` since
 container start).
+
+---
+
+## 2026-06-06 03:09 UTC — contract pins for scheduler/cron driver
+
+**Context.** GOAL.md fully checked, `BUILD_COMPLETE` still valid. Local
+clone arrived behind origin (clone at `9f7307b`, origin at `0d78832` —
+9 commits of contract-pin work from earlier today). Fast-forwarded
+before starting. Continuing the established cadence: hunt for an
+un-pinned seam, pin it, ship.
+
+**Seam.** `src/scheduler/cron.ts` is the production driver around
+`node-cron` + `runDailyMatch`. The existing `tests/scheduler/cron.test.ts`
+covers three things: invalid-expression rejection, the `triggerNow`
+round-trip on an empty DB, and `stopScheduler` not throwing. It does
+NOT touch anything about HOW we drive node-cron, so several real
+invariants would regress silently:
+
+1. **`validate` runs BEFORE `schedule`.** Flip the order and we'd
+   schedule a malformed task, then throw — meaning a cron task gets
+   registered in node-cron's internal map (`registry.add`) before the
+   error surfaces. Pinned via an `order` array that captures the
+   sequence of mock calls.
+2. **`schedule` is NOT called when validate returns false.** Same
+   threat surface as above. Pinned with `expect(scheduleImpl).not.toHaveBeenCalled()`
+   on an "INVALID" expression.
+3. **Default timezone is exactly `{ timezone: "UTC" }`** — not
+   undefined, not host-local. node-cron defaults to host-local time,
+   which would silently shift the 9pm-PT daily-match cutover by 7
+   hours on a US-East Render box. Pinned via `toEqual` deep-equal,
+   not `toMatchObject` (so accidentally adding a sibling field is
+   caught).
+4. **Custom timezone propagates verbatim.** `timezone: "America/New_York"`
+   in → `{ timezone: "America/New_York" }` out, no coercion.
+5. **The scheduled callback is 0-arg and returns `undefined`
+   SYNCHRONOUSLY.** This is the `void runOnce()` wrapper — it's what
+   prevents node-cron from seeing a rejected promise. If we ever
+   change it to `return runOnce()` (an "innocuous" refactor),
+   node-cron's tick wrapper receives a rejected promise; under modern
+   Node that crashes the process. Pinned via `fn.length === 0`,
+   `fn() === undefined`, and `(fn() as any)?.then === undefined`.
+6. **`handle.task` is the same object node-cron returned.** Pinned
+   via referential equality (`toBe`) on a captured fake task.
+7. **`triggerNow` returns the runDailyMatch result on success** — so
+   the admin endpoint can render the metrics.
+8. **`triggerNow` PROPAGATES rejections.** This is the asymmetry: the
+   *scheduled* tick uses `void` so node-cron doesn't crash, but
+   `triggerNow` (used by the admin endpoint) rethrows so an operator
+   gets a 500 instead of a silent failure. Pinned via
+   `expect(handle.triggerNow()).rejects.toThrow(...)`.
+9. **Logger contract.** `info({cron}, "scheduler.tick")` on entry,
+   `info({candidates, selected, notified, notifyErrors}, "scheduler.tick complete")`
+   on success, `error({err}, "scheduler.tick failed")` on failure.
+   Pinned via `Object.keys(payload).sort()` on the completion log so a
+   refactor that smuggles `durationMs` in is observable, plus pinned
+   payload values from the empty-DB run.
+10. **The completion log does NOT fire on failure.** Pinned to catch
+    a refactor that moves the completion log out of the try/catch.
+11. **The captured tick callback drives runDailyMatch end-to-end** —
+    invoke it, let microtasks drain, observe the completion log. Pins
+    that the scheduled path is functionally the same as `triggerNow`.
+
+**Shipped.** `tests/scheduler/cronContract.test.ts` — 19 tests across
+6 describe blocks, all green. Strategy:
+
+- `vi.hoisted` to expose the spy/state objects to both the `vi.mock`
+  factory (which is hoisted above all `const`s) and the test bodies.
+  This was the one wrinkle — the obvious pattern of declaring spies as
+  top-level `const`s fails with "Cannot access 'X' before initialization"
+  because `vi.mock` runs before the const initialisers.
+- The mock returns BOTH `default` and named exports (`schedule`,
+  `validate`) so the source's `import cron from "node-cron"` and any
+  future named-import refactor still find the same spies.
+- An `unhandledRejection` listener wraps the failing-tick test (the
+  void-wrapper invariant) so we can observe + log the rejection
+  without crashing the test process under modern Node. We don't pin a
+  specific unhandled-rejection count because that's version-dependent;
+  we pin only the observable contract (callback returned undefined,
+  error path logged through the configured logger).
+- A `throwingDb` helper that errors on `user.findMany` — first DB
+  call inside `runDailyMatch.loadSelectorContext` — so the failure
+  surfaces immediately and the `scheduler.tick failed` log path is
+  exercised end-to-end without mocking `runDailyMatch` itself.
+
+**Verified.**
+
+- `npm install` — fresh `node_modules`.
+- `npm run typecheck` — clean.
+- `npm run lint` — clean.
+- `npm test` — **652/652** across 43 test files (5.33s), +19 from the
+  new file.
+- `npm run build` — clean.
+
+**Why this isn't make-work.** The default-timezone regression is the
+scariest of the lot: node-cron silently defaults to host-local, the
+existing test passes with any non-empty timezone string, and
+Render/Fly default to UTC anyway — so the bug wouldn't appear until
+someone moved the deploy or set `TZ` for a different reason. The
+`void runOnce()` wrapper is even more subtle: dropping the `void`
+keeps every existing test passing because `triggerNow` already
+rethrows; the bug only manifests at 9pm UTC when a real tick fires
+against a broken DB and crashes the process. Both are pinned now via
+deep-equal on the schedule options object and a `fn() === undefined`
+assertion on the captured callback.
+
+**State.** GOAL.md still fully checked; `BUILD_COMPLETE` still valid;
+human blockers (entity, Twilio + 10DLC, domain, deploy) still tracked
+in `USER_TODO.md`. Hourly routine still fires; only the human can
+disable it. Standing advice continues: no empty commits, hunt for a
+real seam. Reminder from prior runs: container's local `origin/main`
+reads as "up to date" even when remote has moved since clone — always
+`git fetch origin main` before trusting tracking refs (today's fetch
+revealed origin had advanced 9 commits from clone state).
