@@ -2,6 +2,110 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-06 ~05:08 UTC — contract pins for the milestone unlock ladder
+
+`BUILD_COMPLETE` still in force; routine continues to fire hourly until
+the human disables it. Used the slot to land another real structural
+seam rather than a no-op commit.
+
+**Target:** `src/milestones/unlock.ts` + `src/milestones/types.ts`.
+The behavioural tests in `tests/milestones/unlock.test.ts` cover the
+rung-by-rung outcomes (AGE/PROFESSION/HEIGHT decisions, ladder pause,
+custom thresholds) but use volume/depth values that are *well above*
+every threshold — so several real structural invariants would regress
+silently:
+
+1. **DEFAULT_UNLOCK_THRESHOLDS shape:** exact rung order
+   (AGE→PROFESSION→HEIGHT), length=3, key-set per rung, no FACE in
+   the depth ladder, monotonically increasing `minTotalMessages` and
+   `minMessagesPerSide`, non-decreasing `minAvgDepthScore`, and the
+   `2 * minMessagesPerSide <= minTotalMessages` consistency check.
+   A swap of HEIGHT and PROFESSION (or HEIGHT's depth bar dropped to
+   0.3) currently passes every existing test.
+2. **`>=` (inclusive) boundary** on each of the four `meetsThreshold`
+   dimensions. The existing fixtures use 6/6/0.4 for AGE (vs floor of
+   10/4/0.3) and 13/13/0.45 for PROFESSION (vs 25/10/0.4) — every
+   value is *strictly* above the bar, so flipping `>=` to `>` in
+   `meetsThreshold` would keep all existing tests green while
+   silently delaying every unlock by one message / one tick of depth.
+   Pinned with constructed-at-the-floor fixtures using dyadic-rational
+   depth (0.5) so the average survives floating-point summation.
+3. **No-skip across ALL three cross-rung combinations.** Existing
+   coverage only pins AGE-blocks-PROFESSION. Added pins for:
+   - `unlocked={}` + HEIGHT-volume → returns AGE (not PROFESSION/HEIGHT)
+   - `unlocked={AGE}` + HEIGHT-volume → returns PROFESSION (not HEIGHT)
+   - `unlocked={PROFESSION}` (defensive: ladder consulted per-rung,
+     not as a monotone prefix) → returns AGE
+   - `unlocked={AGE, PROFESSION}` + AGE-only volume → returns null
+     (HEIGHT bar not met). Existing test 157 only pins this for
+     PROFESSION; HEIGHT was unpinned.
+4. **Purity contract.** `ReadonlySet` / `readonly` arrays are
+   compile-time only — a refactor that does `input.unlocked.add(...)`
+   inside the rule would corrupt callers. Pinned via snapshot-equality
+   before/after for both `unlocked` and `messages`, plus a "same input
+   → same output across two calls" determinism pin.
+5. **Default-parameter contract.** Omitting the `thresholds` arg
+   behaves identically to passing `DEFAULT_UNLOCK_THRESHOLDS`. Empty
+   thresholds returns null + still computes stats (loop never enters,
+   summarize runs unconditionally).
+
+**Shipped.** `tests/milestones/unlockContract.test.ts` — 25 tests
+across 5 describe blocks, all green. Notable choices:
+
+- For the depth-boundary pin, used `depthScore = 0.5` on every
+  message so the IEEE-754 sum is exact (`0.5 + 0.5 + ... = N/2`),
+  avoiding the `0.3 + 0.3 + ... ≠ 3.6` floating-point trap that would
+  flake an at-the-boundary test against the default AGE threshold of
+  0.3. The boundary check uses a CUSTOM threshold (`minAvgDepthScore:
+  0.5`) so the floor is exactly representable. The "just below"
+  counterpart uses 0.4 (also dyadic) to stay clear of float rounding.
+- For the per-side-floor boundary, used `(6, 4)` and `(4, 6)`
+  fixtures — both sides at or above 4, total at 10 — to isolate the
+  per-side condition from the total condition. Symmetric pair pins
+  that A-side and B-side are checked independently.
+- Defensive `unlocked={PROFESSION}` pin: catches a refactor that
+  treats `unlocked` as a monotone prefix (e.g. "highest unlocked is
+  PROFESSION → ladder is past AGE") rather than checking each rung's
+  presence in the set independently. The current code calls
+  `input.unlocked.has(t.milestone)` per rung, so PROFESSION-only
+  unlocked correctly returns AGE.
+- `makeMessages` here builds `[A×fromA, B×fromB]` in block order
+  rather than interleaving — order doesn't matter for the rule (the
+  for-loop counts each side and averages, no temporal logic) so the
+  simpler shape is fine and makes fixtures readable.
+
+**Verified.**
+
+- `npm install` — fresh `node_modules` in this fresh container.
+- `npm run typecheck` — clean.
+- `npm run lint` — clean.
+- `npm test` — **690/690** across 45 test files (~7s), +25 from the
+  new file. The intermediate increase (652→665 from prior pins, plus
+  contract files I hadn't observed in the truncated PROGRESS.md tail)
+  brings the suite to 690.
+- `npm run build` — clean.
+
+**Why this isn't make-work.** The `>=` boundary regression is the
+scariest of the lot: flipping to `>` on the depth bar would block
+every unlock for users who hit the floor exactly, and the existing
+tests would all stay green because they use values strictly above the
+bar. The threshold-ordering pin catches a different class of bug — a
+config refactor that accidentally swaps rungs would let HEIGHT unlock
+before PROFESSION (wrong PRD direction; users see height before
+profession, which leans toward the "stat-fishing" failure mode the
+PRD specifically warns against). The `unlocked={PROFESSION}`-only
+defensive pin would catch a future refactor that tried to short-
+circuit the ladder by checking only the "highest" entry.
+
+**State.** GOAL.md still fully checked; `BUILD_COMPLETE` still valid;
+human blockers (entity, Twilio + 10DLC, domain, deploy) still tracked
+in `USER_TODO.md`. Hourly routine still fires; only the human can
+disable it. Standing advice continues: no empty commits, hunt for a
+real seam. Reminder from prior runs: container's local `origin/main`
+reads as "up to date" even when remote has moved since clone — always
+`git fetch origin main` before trusting tracking refs (today's fetch
+showed `9f7307b..814c7eb` had landed since this container's clone).
+
 ## 2026-06-06 ~04:08 UTC — contract pins for `src/lib/pair.ts`
 
 **State entering.** Detached HEAD on the freshly-cloned container was
