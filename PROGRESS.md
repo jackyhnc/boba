@@ -2,6 +2,99 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-06 02:10 UTC — contract pins for stat-fishing detector
+
+**Context.** GOAL.md fully checked; `BUILD_COMPLETE` still valid. Local
+`main` fast-forwarded from `9f7307b` (detached clone HEAD) to `baa52ef`
+after `git fetch origin main` — the four no-op runs since 2026-06-05
+have not advanced the codebase, only the log. Continuing the
+"hunt-for-a-real-seam" cadence rather than logging a fifth no-op.
+
+**Seam.** `src/safety/statFishing.ts` is the anti-doxxing gate that
+decides whether an inbound SMS is probing for identity info before the
+milestone ladder is allowed to reveal it. Existing
+`tests/safety/statFishing.test.ts` (10 assertions) pins categories on
+positive cases and confidence for the simple one-category case, but
+six silent-regression paths remain:
+
+1. **`matches[]` telemetry tags** — completely untested. Removing
+   `matches.push(probe.tag)` would still leave `categories` and
+   `flagged` correct, but moderation telemetry would go dark.
+2. **Confidence is per-CATEGORY, not per-MATCH** — the existing
+   two-category test only checks `>= 0.8`, so swapping
+   `categories.size * 0.4` for `matches.length * 0.4` silently passes
+   every existing assertion. (Probes inside one category can fire
+   2-3× on a single message, so this matters.)
+3. **`flagged === categories.length > 0`** — a `flagged = confidence
+   >= 0.5` refactor would silently demote every single-category hit
+   (confidence 0.4) to `flagged=false`. The existing single-category
+   tests only check `.categories.toContain(...)`, not `.flagged`.
+4. **`@handle` regex's `(?:^|\s)` anchor** — protects emails like
+   `user@example.com` from false-flagging as a social-handle ask.
+   Dropping the anchor is a one-character change that silently fires
+   on every email mention.
+5. **Social platform keyword probes require `.*\?`** — distinguishes
+   `are you on insta?` from `I love instagram`. Untested.
+6. **`shouldGateBy` photo→FACE binding** — pins that
+   AGE/PROFESSION/HEIGHT unlocks alone don't release the photo gate
+   (only FACE does). The existing test only checks the all-FACE and
+   empty-set extremes.
+
+**Shipped.** `tests/safety/statFishingContract.test.ts` — 17 tests
+across 7 describe blocks, all green. Each test is written so that the
+most plausible refactor that would otherwise pass the existing suite
+fails here. Key concrete pins:
+
+- `detectStatFishing("send a pic").matches` literally contains
+  `"asks_photo"`; `"where do you live?"` contains `"asks_where_live"`.
+  Pins tag identity, not just presence.
+- `"what's your name? what's your last name?"` → exactly
+  `categories: ["name"]`, `matches.length >= 2`, `confidence === 0.4`
+  (precision 5). Three name-probes fire on one category. The
+  `matches.length * 0.4` refactor would lift this to ≥ 0.8 and break.
+- `"what's your name?"` → `flagged: true` and `confidence: 0.4`.
+  Refactoring to a `confidence >= 0.5` threshold silently flips
+  `flagged` to false; this catches it.
+- `"contact me at user@example.com if needed"` →
+  `categories` excludes `"social"`, `flagged: false`. Dropping the
+  `(?:^|\s)` anchor on the `@handle` probe would silently break this.
+- `"I love instagram"` is NOT social (statement); `"are you on insta?"`
+  IS (question). Pins the `.*\?` requirement.
+- `shouldGateBy("photo", new Set(["AGE","PROFESSION","HEIGHT"]))` →
+  `true`. Photo gate is bound to FACE *specifically*, not any unlock.
+- All five non-photo categories (name/school/social/phone/location)
+  return `true` from `shouldGateBy` even with every milestone unlocked.
+
+**Verified.**
+
+- `npm install` — fresh `node_modules` (container starts clean).
+- `npm run typecheck` — clean. The contract tests import the
+  `StatFishCategory` type and `MilestoneType` from `@prisma/client`
+  to avoid stringly-typed `Set<string>` calls into `shouldGateBy`.
+- `npm run lint` — clean.
+- `npm test` — **633/633** across 42 test files (6.67s), +17 from the
+  new file (was 616/41).
+- `npm run build` — clean.
+
+**Why this isn't make-work.** The six listed refactors are all things
+the existing suite green-lights: dropping `matches.push`, swapping
+`categories.size` for `matches.length` in confidence, raising the
+flagged threshold to `>= 0.5`, dropping the `(?:^|\s)` email-safety
+anchor, dropping the `.*\?` social-question requirement, or coupling
+the photo gate to any-milestone-unlock. Each one silently weakens the
+anti-doxxing gate or the moderation telemetry that feeds report flow.
+The new file makes each observable.
+
+**State.** GOAL.md still fully checked; `BUILD_COMPLETE` still valid;
+human blockers (entity, Twilio + 10DLC, domain, deploy) still tracked
+in `USER_TODO.md`. Hourly routine still fires; only the human can
+disable it. Standing advice continues: no empty commits, hunt for a
+real seam. Reminder from prior runs: container's local `origin/main`
+reads as "up to date" even when the remote has moved since clone —
+always `git fetch origin main` before trusting tracking refs (today's
+fetch revealed origin had advanced from `9f7307b` to `baa52ef` since
+container start, eight commits behind).
+
 ## 2026-06-06T01:15Z — No-op (BUILD_COMPLETE still in force)
 
 `BUILD_COMPLETE` present, `GOAL.md` fully checked, fetched `origin/main`
