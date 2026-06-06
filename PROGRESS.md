@@ -2,6 +2,109 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-06 ~04:08 UTC — contract pins for `src/lib/pair.ts`
+
+**State entering.** Detached HEAD on the freshly-cloned container was
+already at `origin/main` after fetch — prior runs all pushed
+successfully. `BUILD_COMPLETE` still in force. GOAL.md checklist
+fully checked. Routine is operating in "keep shipping refactor-safety
+pins" mode per the prior agents' explicit pattern ("no empty commits,
+hunt for a real seam").
+
+**Seam picked.** `src/lib/pair.ts` (20 lines, 2 functions: `orderPair`
+and `isOrderedPair`). Existing coverage in `tests/prisma.test.ts` is
+shallow — it pins the happy-path swap, the self-pair throw, and the
+two `isOrderedPair` directions. What it does NOT pin: locale-
+independence, lexicographic-not-numeric ordering, symmetry,
+idempotence, return-shape minimality, the `false`-on-equal-inputs
+behaviour of `isOrderedPair`, error-message debuggability, and the
+property-based invariant `userAId < userBId` across random inputs.
+
+This matters because `orderPair` encodes a DB-level invariant: every
+`DailyMatch` and `RematchHistory` row is canonicalised through this
+helper before write, and every read uses the same canonical order in
+the WHERE clause. A "harmless" refactor that breaks the comparator
+silently corrupts the on-disk uniqueness invariant — the failure
+mode is "duplicate (A,B) and (B,A) rows quietly appear and matching
+starts double-pairing users" rather than a noisy crash.
+
+**Pins shipped** (`tests/lib/pairContract.test.ts`, 13 tests, 4
+describe blocks):
+
+1. **Symmetry.** `orderPair(a, b)` deep-equals `orderPair(b, a)`.
+2. **Idempotence.** Feeding the result back in is a fixed point.
+3. **Return shape minimality.** `Object.keys(result).sort() ===
+   ["userAId", "userBId"]`. Pin against a refactor that smuggles a
+   `swapped: boolean` or `original: [string, string]` into the
+   shape — downstream Prisma `.create` / `.upsert` payloads spread
+   this object verbatim, and an extra key becomes a Prisma "unknown
+   field" runtime error.
+4. **Code-unit (NOT locale-aware) ordering.** `orderPair("Z", "a")`
+   MUST return `userAId="Z"` (code-unit: 'Z'=0x5A < 'a'=0x61). A
+   `localeCompare` refactor flips this in en-US AND makes the
+   ordering ICU-version-dependent — two app instances on different
+   Node versions could disagree on the canonical pair.
+5. **Lexicographic (NOT numeric) ordering.** `orderPair("10", "2")`
+   MUST return `userAId="10"`. A `Number(x) - Number(y)` refactor
+   would invert this and silently misorder any digit-prefixed ids.
+6. **Empty string is strictly less than any non-empty string.** Pin
+   against a defensive `if (!x) return ...` short-circuit.
+7. **Self-pair THROWS, does not return.** Belt-and-suspenders: even
+   under a refactor that softens the guard, no value is returned for
+   the equal-input case. A returned self-pair would propagate to a
+   `dailyMatch.create` and surface as a noisy DB constraint error
+   instead of the helpful application-level message.
+8. **Error message contains the offending id.** Substring (not
+   exact) so wording can evolve; the id is the trace breadcrumb on
+   on-call.
+9. **`isOrderedPair(x, x) === false`.** Equal inputs are NOT
+   canonical because `orderPair` will refuse to produce them. A
+   refactor to `<=` would flip this and let callers skip the swap
+   on (x, x), then hand the un-swapped pair to a downstream
+   `orderPair` call that crashes deep in the stack.
+10. **Cross-check.** `isOrderedPair(orderPair(x, y).userAId,
+    orderPair(x, y).userBId) === true` across a curated set of
+    representative cases (ASCII, mixed case, digit prefix, empty
+    string, reverse-sorted). If a refactor changes one comparator
+    and not the other, this asymmetry surfaces here.
+11. **Property-based invariant.** 200 random pairs drawn from a
+    mixed alphabet (lowercase, uppercase, digits, hyphen,
+    underscore); for each, assert `result.userAId < result.userBId`,
+    `result.userAId !== result.userBId`, and that both output ids
+    are members of the input set (the helper must not invent or
+    mutate). Catches a refactor that only handles ASCII or only
+    handles short ids.
+
+**Verified.**
+
+- `npm install` — fresh `node_modules`, 321 packages.
+- `npm run typecheck` — clean.
+- `npm run lint` — clean.
+- `npm test` — **665/665** across 44 test files (6.92s), +13 from
+  the new file.
+- `npm run build` — clean.
+
+**Why this isn't make-work.** Of the 11 pins, the locale-compare
+one (#4) is the scariest: it would not fail any deployment-wide
+test, would not show up in CI, and would only surface as duplicate
+match rows on a long enough timeline. The lexicographic-vs-numeric
+one (#5) is the second-scariest — if user ids ever switch to
+numeric prefixes (e.g., an auto-incrementing migration), a
+`Number()` refactor would suddenly start silently misordering
+pairs. The property-based pin (#11) is the catch-all: even if a
+future refactor introduces a subtle comparator bug we didn't
+anticipate, 200 random pairs across a mixed alphabet should
+surface it.
+
+**State.** GOAL.md still fully checked; `BUILD_COMPLETE` still
+valid; human blockers (entity, Twilio + 10DLC, domain, deploy) still
+tracked in `USER_TODO.md`. Hourly routine still fires; only the
+human can disable it. Standing advice continues: no empty commits,
+hunt for a real seam. Reminder from prior runs: container's local
+`origin/main` reads as "up to date" even when remote has moved
+since clone — always `git fetch origin main` before trusting
+tracking refs.
+
 ## 2026-06-06 02:10 UTC — contract pins for stat-fishing detector
 
 **Context.** GOAL.md fully checked; `BUILD_COMPLETE` still valid. Local
