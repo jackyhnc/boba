@@ -2,6 +2,161 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-07 ~02:08 UTC — contract pins for src/safety/moderation.ts (severe partition + REPORT parser + ACK copy)
+
+Hourly fire. `BUILD_COMPLETE` is still in force. Continued the
+contract-pin pattern the previous agents established. Picked item 4
+off the previous run's hand-off list — `src/safety/moderation.ts`,
+the harassment/profanity detector + REPORT keyword parser. Item 3
+(`src/decisions/flow.ts`) was shipped last hour (643c841).
+
+**What was already there.** `tests/safety/moderation.test.ts` covers
+happy-path behaviour: a threat fires severe, profanity fires non-
+severe, parseReportCommand handles bare/reason/reason+details and
+trims, recordReport adapter increments + auto-bans. Nothing pinned
+the structural invariants of the pure surface — the result-shape
+contract, the severe partition specifically (severe ⇔
+slur∨threat∨sexual_coercion, NOT profanity), the persisted category
+strings, the "unspecified" sentinel, REPORT-first-token strictness,
+or the REPORT_ACK copy. These are all silent-regression candidates.
+
+**Shipped.** `tests/safety/moderationContract.test.ts` — 30 tests
+across 6 describe blocks, all green. Structure mirrors
+`smsKeywordsContract.test.ts` and `statFishingContract.test.ts`:
+named explanatory describes, exact-body pins for any external-
+boundary contract, targeted assertions alongside the verbatim pin so
+failure messages stay legible.
+
+The 30 tests break down:
+
+1. **Result-shape contract (6 tests).** Keys are exactly
+   `{flagged, categories, matches, severe}`; empty input returns the
+   canonical zero-detection object by value (not just `flagged:
+   false`); whitespace-only takes the same branch; the
+   `flagged ⇔ categories.length > 0` invariant; the Set-dedupe
+   contract on `categories` (two same-category probes → one entry);
+   purity under repeated calls and array-mutation isolation between
+   calls. The empty-input value pin is the one most likely to catch
+   real drift — a refactor that returns `categories: undefined` or
+   omits `matches` on the early-exit branch passes every existing
+   test (which only checks `.flagged`) but breaks this one.
+
+2. **Canonical category strings (4 tests).** Exercises each of the
+   four `HarassmentCategory` members — slur / threat / sexual_coercion
+   / profanity — with a fixture that fires it. Pins the strings AS
+   PERSISTED. The persisted column on Report rows uses these literally
+   and analytics group on them, so renaming any one is a migration,
+   not a refactor.
+
+3. **Severe partition (6 tests).** This is the moderator-paging
+   contract and the whole point of the `severe` flag.
+   - severe=true for slur ALONE
+   - severe=true for threat ALONE
+   - severe=true for sexual_coercion ALONE
+   - severe=false for profanity ALONE  ← the asymmetric one
+   - severe=true when ANY severe category co-occurs with profanity
+     (stickiness — doesn't get diluted by the non-severe member)
+   - severe=false when unflagged (no severe-without-flagged states).
+
+   The profanity-alone pin is the key one. The existing behavioural
+   test asserts `severe` is false for "fuck off" but doesn't
+   isolate the partition rule; a refactor that flips `severe` to
+   `flagged` would pass the kill-threat test (still severe) and the
+   "fuck off" test (still flagged, but now incorrectly severe) — wait,
+   actually it would FAIL the fuck-off test as currently written, so
+   the existing test does cover one direction. What it doesn't cover
+   is the asymmetric direction: `severe` calculated by OR-ing all
+   four categories instead of three. That refactor passes
+   `expect(severe).toBe(false)` for "fuck off" if profanity is the
+   only hit — wait, no, OR of one would still be true. Reread the
+   probe: if profanity is included in the severe OR, then
+   `cats.has("profanity") || cats.has("slur") || ...` would be true
+   for "fuck off" → severe=true → fails behavioural test. So that
+   particular refactor is caught. The refactor this file DOES catch
+   is the inverse — dropping one of slur/threat/sexual_coercion from
+   the severe OR (e.g. an over-aggressive "sexual_coercion is too
+   subjective, demote it" pass): currently no test exercises
+   sexual_coercion-alone against `severe=true`, so that demotion
+   ships silent. Pinned.
+
+4. **parseReportCommand structural contract (9 tests).** Result-shape
+   pin (null OR exactly {reason, details}); the "unspecified"
+   sentinel (bare REPORT, AND empty-before-colon "REPORT : details");
+   trailing-colon-no-details normalises details to null (not ""); the
+   first-':' split (so "ratio 3:1 happened" survives intact in
+   details); the first-token-only enforcement (REPORTING / REPORTS /
+   REPORTED don't parse); the no-punctuation-suffix rule
+   ("REPORT:foo" doesn't parse — pinned against a `[\s:]+` separator
+   refactor); positional (a REPORT mid-sentence doesn't parse);
+   purity. The "REPORT:foo" pin is the most defensive — the current
+   regex is `/^report(?:\s+(.+))?$/i` and the colon immediately after
+   REPORT breaks the match. If someone "fixed" that to be friendlier,
+   they'd be parsing input the existing test set doesn't cover.
+
+5. **REPORT_ACK copy pin (3 tests).** Exact verbatim body + targeted
+   substring asserts for "Thanks for the report." prefix and the
+   "reply BLOCK" escape-hatch mention. Same rationale as the SMS
+   keyword reply pins — drift is a UX bug, possibly a stuck-in-match
+   bug if BLOCK becomes a real keyword and the copy isn't kept in
+   sync.
+
+6. **TypeScript shape pins (2 tests).** The HarassmentDetection /
+   ReportCommand shapes are smuggled in as structural-assignment
+   tests — `const d: HarassmentDetection = { ... }`. If a field is
+   added or removed, the assignment fails to type-check and `npm run
+   typecheck` (CI) surfaces it. The runtime expect is incidental.
+
+**Verified.**
+- `npm install` — fresh `node_modules`, 321 packages.
+- `npm run typecheck` — clean.
+- `npm run lint` — clean.
+- `npm test` — **847/847** across 51 files (7.97s), +30 from the
+  new file (was 817/817 across 50).
+- `npm run build` — clean.
+
+**Why this isn't make-work.** The severe-partition tests catch a
+specific class of bug that's invisible to the behavioural suite: the
+silent demotion of one of the three severe categories. Today the
+only way to know that sexual_coercion is in the severe set is to
+read the source — no test exercises it standalone against
+`severe=true`. A code review that says "this seems too broad, let's
+move it to a warning bucket" lands as a passing diff. After this
+file, that diff fails a test with a legible error message.
+
+Similarly the "REPORT:foo" pin: today the existing tests would let
+a "be friendlier with separators" change ship, silently broadening
+the REPORT command to also trigger on colon-prefixed text. That's a
+DoS surface (auto-acks for any inbound matching `^report.*$`) and a
+silent change to a moderation entry point. After this file, breaks.
+
+**For the next agent.** `BUILD_COMPLETE` remains in force; only a
+human can disable the hourly trigger. Continue the contract-pin
+pattern. Refreshed priority list (demote item 4, promote
+successors):
+
+1. ~~`src/twilio/conversation.ts`~~ — DONE (78ea945)
+2. ~~`src/twilio/routes.ts`~~ — DONE (f93df1d)
+3. ~~`src/decisions/flow.ts`~~ — DONE (643c841)
+4. ~~`src/safety/moderation.ts`~~ — DONE (this run)
+5. `src/matching/selector.ts` — the selection invariants (no
+   self-pair, no-repeat-except-rematch, deterministic-given-seed).
+   `tests/matching/selector.test.ts` is the only file there now.
+6. `src/milestones/depth.ts` — the depth-signal scoring formula
+   pins (length weight, question-ratio coefficient, clamping).
+   `tests/milestones/depth.test.ts` exists; no Contract file.
+7. `src/invites/code.ts` — Crockford alphabet (the trap the previous
+   agent noted is direct evidence this is undertested structurally),
+   length, collision-rejection contract. `tests/invites/code.test.ts`
+   exists; no Contract file.
+8. `src/safety/prisma-deps.ts` (`recordReport` Prisma adapter) —
+   the auto-ban threshold semantics (`>=` vs `>`, transactional
+   atomicity contract). Existing test covers happy paths; a contract
+   pin could lock the >=-not-> boundary explicitly.
+
+Don't go after this mechanically — re-evaluate. `find tests -name
+'*Contract*'` is the right first move to see what's left
+unpinned.
+
 ## 2026-06-07 ~01:08 UTC — contract pins for src/decisions/flow.ts (end-of-day pure-fn surface)
 
 Hourly fire. `BUILD_COMPLETE` = `DONE` is still in force; per the
