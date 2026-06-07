@@ -2,6 +2,165 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-07T17:07 — verbatim COPY contract pins for `src/twilio/conversation.ts` (router-emitted SMS bodies + prependedWarning template)
+
+**Context.** BUILD_COMPLETE is in force; GOAL.md fully checked. The hourly
+agent keeps running, and prior tails have been adding contract pins on
+remaining seams. The most recent tail (cf705ca rematch contract) flagged
+`twilio/conversation.ts` relay COPY templates as still-not-fully-pinned —
+`conversationContract.test.ts` covers router precedence, RouteResult
+shape, kind enumeration, hard-flag depth zeroing, and substring/regex
+checks of the COPY surface (the `JOIN` / `RESUME` keywords, the
+`{{stat}}` placeholder form, the `prependedWarning` prefix), but it does
+NOT pin the user-visible body of each constant verbatim. A rewrite like
+
+    unknownSenderIntro:
+      "Welcome to Boba — invite-only beta. Send JOIN with your code to start."
+
+would still pass `/\bJOIN\b/` while changing the SMS the user receives.
+For a 10DLC campaign that registers sample messages with the carrier,
+silent drift between code and carrier-registered samples is a
+deliverability problem we discover in production. Plus
+`prependedWarning` lives as inline string literals in conversation.ts
+(NOT in COPY), so even the contract test's regex couldn't catch a
+rewording — only "starts with this prefix" was nailed.
+
+**Shipped.** `tests/twilio/conversationCopyContract.test.ts` — 24
+focused contract pins in 4 sections. Net suite: 1004 → 1028 (+24)
+across 57 → 58 files.
+
+1. **Verbatim COPY bodies (8 pins).** Each of the 7 COPY constants
+   (`unknownSenderIntro`, `onboardingStub`, `noMatchHolding`, `paused`,
+   `revealAge`, `revealProfession`, `revealHeight`) pinned by exact
+   string equality. Plus the COPY key set closed via
+   `Object.keys(COPY).sort() === [...]` — adding/removing a key now
+   surfaces here in the same commit.
+   - Also pinned cross-cutting properties: every reveal template uses
+     U+2014 em-dash (not hyphen / not two-dash), and every reveal
+     template starts with `"✨ Milestone unlocked"` (a sparkles glyph
+     some metrics dedupe on).
+   - `noMatchHolding` specifically pins the "5pm" window, which is a
+     soft contract with the daily-match scheduler — if the scheduler
+     moves, this body moves in the same commit.
+   - `revealHeight` pins the unit suffix `cm` being baked into the
+     TEMPLATE (not appended at substitution time) — a refactor that
+     "helpfully" appends cm in `renderRevealBody` would double it
+     ("174cmcm"); this pin catches the regression.
+
+2. **`renderRevealBody` post-substitution output (5 pins).** The IO
+   layer ships these strings to Twilio as-is. The pin is the entire
+   rendered body, not just a substring — a refactor that added a
+   leading `"Boba: "` prefix or stripped the trailing period would
+   still pass `.toContain("22")`. Pinned: AGE with stat, PROFESSION
+   with stat (`"physics student"` round-trips as the profession noun
+   phrase verbatim), HEIGHT with stat, FACE (unreachable from the
+   router — `MilestoneType` exhaustiveness — but still part of the
+   public API), and the U+2014 missing-stat substitution behaviour
+   across all three templates.
+
+3. **`prependedWarning` template (7 pins).** This is where the gap
+   was sharpest — the function lives as inline literals in
+   conversation.ts (not in COPY), with the existing contract only
+   pinning `^⚠ Heads up: this asks about ` (a prefix regex) and
+   `"personal info"` (a multi-category substring). I probe via
+   `route(...).outbounds.find(o => o.kind === "relay").body` — a
+   black-box pin that survives the function staying private. Pinned:
+   - Single-category warning verbatim for `name`, `social`, `school`
+     — locks the exact tag interpolation (`name`, not `Name` /
+     `names` / `last name`).
+   - Multi-category collapse to the literal phrase
+     `"⚠ Heads up: this asks about personal info before the
+     reveal — that's against Boba's flow."` — pinned verbatim so a
+     refactor that joined categories with commas (and accidentally
+     leaked internal detector tags like `"asks_last_name"`) is loud.
+   - Separator pin: the relay body is exactly `${warning}\n${original}`
+     — one newline, not two, and original verbatim with no leading
+     or trailing whitespace contamination. (Twilio segments charge
+     by the 160-char boundary; a stray `\n\n` matters.)
+   - Glyph pin: U+26A0 monochrome warning glyph, NOT the VS-16
+     variant (`⚠️` with U+FE0F), which some carriers render as a
+     colorful emoji instead of the documented monochrome glyph. The
+     pin asserts `body.startsWith("⚠️") === false` explicitly.
+   - Dash pin: em-dash U+2014 (`— that's against Boba's flow`), NOT
+     en-dash U+2013 and NOT hyphen-minus.
+
+4. **Photo-category gating semantics (2 pins).** `shouldGateBy("photo",
+   ...)` is the ONE category whose gate flips per-match: when FACE
+   unlocks (end-of-day reveal), photo questions stop being hard-flagged.
+   Pinned via `route()` black-box probe both ways:
+   - With `unlockedMilestones: new Set()`: `"send a pic?"` produces a
+     relay body whose warning line contains `"about photo before the
+     reveal"`.
+   - With `unlockedMilestones: new Set(["FACE"])`: SAME inbound
+     produces `relay.body === "send a pic?"` verbatim (no prefix at
+     all, no `⚠`, AND `persistInbound.flaggedStatFishing === false`).
+   This locks the gating switch — a refactor that simplified
+   `shouldGateBy` to always gate, or moved the gate decision out of
+   `route()`, surfaces here as a regression rather than as
+   user-reported "my partner mentioned photos and the warning
+   suddenly appeared yesterday."
+
+**Verified.**
+- `npm install` — clean.
+- `npx prisma generate` — clean.
+- `npm test` — **1028/1028** across 58 files (was 1004/57, +24).
+- `npm run typecheck` — clean.
+- `npm run lint` — clean.
+- `npm run build` — clean.
+
+**What I did NOT change.** Source code untouched. Every pin is a black-
+box probe of existing behaviour, asserted exactly so future drift is
+loud at PR time rather than silent in production. The `prependedWarning`
+function stays private (no source-level re-export), and the COPY object
+stays declared with `as const` — both pins go through the public
+boundary (`COPY` is exported; `prependedWarning` output is observed via
+`route().outbounds[*].body`).
+
+**Cross-module dependencies pinned implicitly.** The `noMatchHolding`
+body names "5pm" — the daily-match scheduler in `src/scheduler/` runs
+at that hour. If a future agent moves the scheduler, this test fails
+in the same commit. Similarly, `revealHeight` pins `cm` in the
+template — `renderRevealBody` must NOT append the unit on
+substitution; a regression in either direction is loud.
+
+**For the next agent.** Same standing advice: BUILD_COMPLETE is in
+force; only a human can disable the hourly trigger; prefer a real
+contract-pin seam over a no-op commit. Remaining priority items, after
+this run:
+
+1. ~~`src/decisions/resolve.ts` (= `decisions/flow.ts`) 3×3
+   outcome truth-table pin~~ — partially redundant. `flow.test.ts`
+   already covers all DISCARD combos + all KEEP/MAYBE combos by
+   outcome, and `flowContract.test.ts` pins positional-input
+   echo across the full 4×4 (Decision|null) grid. A focused 4×4
+   `outcome` truth-table pin would catch a "MAYBE+MAYBE → pending"
+   refactor that no existing test rules out — moderate value, ~30
+   lines. Worth doing on a future run.
+2. `src/safety/statFishing.ts` PROBE LIST pin — the regex set in
+   `PROBES` (16 probes across 6 categories) is the actual detector
+   contract. `statFishing.test.ts` covers BEHAVIOUR; `statFishingContract.test.ts`
+   pins surface (matches[], confidence-per-category, @handle anchor,
+   social ?-requirement, photo→FACE gate). What's NOT pinned: the
+   category-by-tag membership (e.g. that "asks_facetime" lives under
+   `photo` not under a hypothetical new `video` category). A pin
+   would be `expect(detectStatFishing("facetime?").categories).toContain("photo")`
+   for each probe's representative phrasing. ~20 pins.
+3. `src/scheduler/dailyMatchJob.ts` (if it exists separately from
+   `cron.ts`) — the actual scheduling time + admin trigger surface.
+4. `src/twilio/routes.ts` — webhook routing has a contract test
+   already (f93df1d) but the END-TO-END idempotency story across
+   re-deliveries (Twilio retries on >15s response or 5xx) may not
+   be pinned. Check before adding.
+5. `src/onboarding/flow.ts` PROMPT TEMPLATES — the `ask_*` step
+   reply COPY (the questions Boba sends to the user) was pinned by
+   key set and rejections in 1332f80, but the actual PROMPT BODIES
+   (e.g. the question text "How old are you?") may still be loose.
+   Read `tests/onboarding/flowContract.test.ts` before adding.
+
+Don't go after this list mechanically — re-evaluate each run. A fresh
+`git log --oneline | grep -iE 'contract|pin' | head -30` shows the
+existing coverage. Project is now 58 test files / 1028 tests.
+
 ## 2026-06-07T16:08 — contract pins for rematch module SURFACE (EligibilityReason enum, EligibilityResult shape, cross-module cooldown identity, pairKey re-export)
 
 **Why this seam.** Previous tail's priority list item #4:
