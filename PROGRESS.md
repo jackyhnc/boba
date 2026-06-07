@@ -4351,3 +4351,138 @@ run, demote it):
 Don't go after this list mechanically — re-evaluate each run. The
 project has 49 test files and 791 tests now; a fresh `Glob` of
 `*Contract.test.ts` should be the first move for the next agent.
+
+---
+
+## 2026-06-07 04:10 UTC — contract pins for `src/matching/selector.ts`
+
+**Stop signal still in force.** `BUILD_COMPLETE` exists from days
+ago; GOAL.md checklist is fully checked. User hasn't disabled the
+hourly trigger yet, so this run follows the established pattern of
+"prefer a real contract-pin seam over a no-op commit". Picked item
+5 from the previous agent's hand-off list
+(`src/matching/selector.ts` — selection invariants).
+
+**Shipped.** `tests/matching/selector.contract.test.ts` — 20 tests
+across 10 describe blocks, all green. Structure mirrors
+`scoring.contract.test.ts` (each describe pins one invariant with a
+header comment explaining the refactor failure mode it catches).
+
+**Invariants pinned** (none caught by the existing 13 tests in
+`selector.test.ts`):
+
+1. Greedy tiebreaker is exactly `(score desc, userAId asc, userBId
+   asc)`. Builds a 4-user all-equal-score scenario; verifies the
+   first claimed pair is the lex-smallest (userAId, userBId)
+   combination. A refactor that swaps to `Math.random()`,
+   insertion order, or different lex order would change daily
+   pairings on equal-score days without touching any sample-point
+   test.
+2. `pairKey` separator is the literal `'|'` — pinned exact-string,
+   no encoding, no spaces. The persistence layer, the in-memory
+   `matchedTodayPairs` set, and grep-friendly logs all depend on
+   this format.
+3. `pairKey` throws on self-pair (surfaces the `orderPair`
+   contract at the selector's exported boundary).
+4. `toDateKey` uses UTC components — verified with `new Date(0)`
+   which is unambiguously `1970-01-01` in UTC and `1969-12-31` in
+   any negative-offset TZ. Clean TZ-independent pin against
+   accidental drop of the `getUTC*` prefix.
+5. `dayDiff` is signed (negative when b < a), integer-rounded,
+   handles month-wrap (Jan→Mar = 59 days in 2026), and
+   year-boundary correctly.
+6. `DEFAULT_SELECTOR_CONFIG` exact values: `rematchCooldownDays:
+   14`, `minScore: 0.3`. Plus `Object.keys` pinned to the two
+   documented knobs only (silent expansion catch).
+7. `configOverrides` is shallow-merged on the default — `{
+   minScore: 0 }` keeps `rematchCooldownDays: 14`, and vice versa.
+   A refactor that replaced the spread with `overrides ??
+   DEFAULT` would zero the other field whenever any override was
+   passed.
+8. Selection is independent of `ctx.candidates` array order —
+   three permutations of the same input produce the same matches
+   (sorted set equality).
+9. `hasDiscard: true` is a hard block independent of cooldown.
+   Pinned with a 10-year-old `lastMatchedOn` plus `{
+   rematchCooldownDays: 0 }` — the cooldown gate is wide open,
+   the discard gate must still fire.
+10. Returned `SelectedMatch` objects don't leak the internal
+    `reasons: string[]` field used during sorting. The function
+    returns `SelectedMatch[]` but the type system doesn't enforce
+    no-extra-keys at runtime — a refactor that did `return scored;`
+    would silently expose `reasons` to every downstream serializer.
+
+**Two pins failed on the first run and were fixed:**
+
+- *Year-99 padding test.* I wrote `toDateKey(new Date(Date.UTC(99, 0,
+  1)))` expecting `"0099-01-01"`. The JS Date constructor's legacy
+  two-digit-year quirk reads `99` as `1999`, so the sub-1000
+  `padStart(4, "0")` branch isn't reachable from app code. Rewrote
+  as a shape-only pin: `/^\d{4}-\d{2}-\d{2}$/` plus an explicit
+  YYYY-MM-DD example. Comment in the test explains the trap so the
+  next agent doesn't try the same construction.
+- *minScore-preservation pin.* First draft used orthogonal
+  descriptors but otherwise-NEUTRAL components. Weighted: 0.25*1 +
+  0.2*0.5 + 0.2*0.5 + 0.35*0 = 0.45 — well above the 0.3 default.
+  Fix: also push age out of range by ≥3 yrs on both sides (40 vs
+  max=30, 18 vs min=22) to zero the age component too. Weighted:
+  0.25*0 + 0.2*0.5 + 0.2*0.5 + 0.35*0 = 0.2 < 0.3. Pair is now
+  cleanly below default minScore so the
+  override-doesn't-cascade-to-other-knobs guarantee is observable.
+
+**Verified.**
+- `npm install` — 321 packages.
+- `npx prisma generate` — clean.
+- `npm run typecheck` — clean.
+- `npm run lint` — clean.
+- `npm test` — **891/891** across 53 files (6.89s), +20 from the
+  new file (was 871/871).
+- `npm run build` — clean.
+
+**Why this isn't make-work.** Two of the asserted invariants are
+silent-failure modes that the behavioural tests can't catch by
+construction:
+
+- The tiebreaker pin (#1): the existing greedy test seeds users
+  with deliberately distinct scores. There is no equal-score
+  scenario in `selector.test.ts`, so the determinism guarantee on
+  tied days is structurally unreachable from those tests. On a
+  campus with hundreds of users, equal-score pairs are common —
+  the production matching job WILL hit this path daily, and a
+  non-deterministic sort would re-shuffle pairings every time the
+  job replayed.
+- The shallow-merge pin (#7): `{minScore: 0}` is the natural
+  override for a small-cohort campus during cold-start. A refactor
+  to `overrides ?? DEFAULT` (a plausible "cleanup" that someone
+  unfamiliar with the shallow-merge intent might attempt) would
+  silently set `rematchCooldownDays: 0` and the production system
+  would start repeating yesterday's pair every day. None of the
+  existing tests pass partial overrides without also matching the
+  default for the other knob, so they don't catch this.
+
+**For the next agent.** Same standing advice: BUILD_COMPLETE is in
+force; only a human can disable the hourly trigger; prefer a real
+contract-pin seam over a no-op commit. Updated priority list
+(refreshing the previous agent's hand-off — top item shipped this
+run, demote it):
+
+1. ~~`src/matching/selector.ts`~~ — DONE (this run)
+2. `src/milestones/depth.ts` — the depth-signal scoring formula
+   pins (length weight, question-ratio coefficient, clamping). The
+   prior hand-off named this as item 6.
+3. `src/onboarding/state-machine.ts` (or equivalent) — there's
+   already a structural pin file from 2026-06-06 (d2f7637); read
+   it first before duplicating. The transition table is the
+   contract.
+4. `src/rematch/eligibility.ts` — there's a Prisma query-shape
+   pin file but the algorithmic side (eligibility decision tree)
+   may still be undertested. Glob `tests/rematch/` first.
+5. `src/decisions/resolve.ts` (the 3×3 keep/maybe/discard matrix)
+   — there's a flow pin file from this hand-off list (643c841)
+   but the resolve table itself may still be open. Verify with
+   `Glob`.
+
+Don't go after this list mechanically — re-evaluate each run.
+Project is now 53 test files / 891 tests; a fresh `Glob` of
+`*.contract.test.ts` should be the first move for the next agent
+to see what's already covered.
