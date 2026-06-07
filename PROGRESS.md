@@ -2,6 +2,145 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-07T11:09 — contract pins for milestones/prisma-deps.ts
+
+**Why this seam.** The previous agent's handoff listed
+`src/milestones/unlock.ts` already pinned (5ba7699) but called out
+"the PRISMA-side accumulation logic in `prisma-deps.ts` may not
+have a contract pin yet." Confirmed: `git log --oneline --
+src/milestones/prisma-deps.ts tests/milestones` shows behavioural
+`record.test.ts` but no `*Contract.test.ts` file targeting the
+query-shape invariants. The behavioural test uses a fake DB that
+ignores `where` / `select` arguments, so silent refactors of the
+Prisma surface would not surface there.
+
+**Shipped.** New `tests/milestones/prismaContract.test.ts`, 13
+pins, all green on first run:
+
+For `recordMilestone`:
+1. Exactly ONE `upsert` call — guards against a refactor to
+   `findFirst` + `create`, which would race under concurrent
+   inbound messages and produce a unique-constraint violation.
+2. WHERE keys on the compound `matchId_milestone` unique index
+   — pinned by `expect(args.where).toEqual({ matchId_milestone:
+   { matchId, milestone } })`. A refactor to `where: { matchId }`
+   would not hit the index.
+3. UPDATE branch is EXACTLY `{}` — the module's "first reveal is
+   the unlock" semantics depend on `unlockedAt` being captured
+   on first write and never overwritten. Any drift (e.g.
+   `update: { unlockedAt: new Date() }` added "for freshness")
+   would re-stamp every reveal.
+4. CREATE payload is EXACTLY `{ matchId, milestone }` — adding
+   `unlockedAt: new Date()` here would override the Prisma
+   `@default(now())` and lose the authoritative DB timestamp.
+   `Object.keys(args.create).sort()` pinned to
+   `["matchId", "milestone"]`.
+5. CREATE values mirror WHERE keys (cross-wiring trap) — pinned
+   for HEIGHT to catch a one-field cross-wire that would slip
+   past AGE-only assertions.
+6. Does NOT issue findMany alongside upsert — no read-then-write
+   probe creep.
+
+For `loadUnlockedMilestones`:
+7. Exactly ONE `findMany`, never per-milestone `findUnique`.
+8. WHERE is EXACTLY `{ matchId }` — no temporal filter, no
+   relational filter. `Object.keys(args.where)` pinned to
+   `["matchId"]`.
+9. SELECT projects EXACTLY `{ milestone: true }` — no over-fetch
+   of `id` / `unlockedAt` / the dailyMatch relation pointer.
+   `Object.keys(args.select)` pinned to `["milestone"]`.
+10. Returns a `Set` (NOT an Array) — `src/milestones/index.ts`
+    gates the ladder via `.has(...)`; a structural-typing slip
+    that returned an array would NPE at call sites in JS-land.
+    Pinned with both `toBeInstanceOf(Set)` and
+    `Array.isArray(got) === false`.
+11. Empty-result returns an empty Set, not null/undefined — the
+    caller dereferences `.has()` immediately, so a null return
+    would NPE. Pinned.
+12. De-duplicates via Set construction even if the DB returned
+    duplicates — defence in depth. Override `findMany` to return
+    a duplicate AGE row plus PROFESSION; assert `got.size === 2`.
+    Belt-and-braces: today the DB unique constraint enforces no
+    dupes, but if a future migration ever relaxed the constraint
+    (e.g. to record re-unlocks for analytics), the Set wrapper
+    here keeps callers from seeing duplicate milestone tokens.
+13. Does NOT issue upsert from inside the read path — guards a
+    side-effect creep.
+
+**No pins failed on first run.** All 13 went green immediately.
+
+**Verified.**
+- `npm install` — clean, 321 packages.
+- `npx prisma generate` — clean.
+- `npm test` (baseline before edit) — **909/909** across 54 files.
+- `npx vitest run tests/milestones/prismaContract.test.ts` —
+  13/13 in 8ms.
+- `npm test` (after edit) — **922/922** across 55 files (+13).
+- `npm run typecheck` — clean.
+- `npm run lint` — clean.
+- `npm run build` — clean.
+
+**Coverage map after this run.** Contract-pin files now in place:
+- `tests/ai/persona.contract.test.ts`
+- `tests/matching/scoring.contract.test.ts`
+- `tests/matching/selector.contract.test.ts`
+- `tests/milestones/depthContract.test.ts`
+- `tests/milestones/prismaContract.test.ts` *(this run)*
+- `tests/milestones/unlockContract.test.ts`
+- Plus `.contract.test.ts` siblings in `safety/smsKeywords`,
+  `safety/moderation`, `safety/statFishing`, `decisions/flow`,
+  `decisions/contract` (recordDecisionAndMaybeResolve persistence),
+  `twilio/conversation`, `twilio/routes`, `invites/code`,
+  `rematch/prismaContract`, `rematch/contract` (selector ↔
+  predicate), plus the structural pin on the onboarding state
+  machine (d2f7637).
+
+**Reassessed from previous handoff.**
+- ~~`src/rematch/eligibility.ts`~~ — REASSESSED: the
+  `tests/rematch/eligibility.test.ts`,
+  `tests/rematch/contract.test.ts`, and
+  `tests/rematch/prismaContract.test.ts` triad already covers
+  both behavioural and query-shape invariants comprehensively.
+  Skip unless a new edge case surfaces.
+- ~~`src/decisions/resolve.ts`~~ — REASSESSED: the `resolve`
+  function lives in `flow.ts`, not a separate `resolve.ts`,
+  and is pinned by `tests/decisions/flowContract.test.ts` test
+  #5 (positional-order, every (a, b) combo). The 3×3 matrix is
+  exhaustively covered by `tests/decisions/flow.test.ts`.
+
+**For the next agent.** Standing advice: BUILD_COMPLETE is in
+force; only a human can disable the hourly trigger; prefer a
+real contract-pin seam over a no-op commit. Updated priority
+list:
+
+1. `src/onboarding/state-machine.ts` — structural pin from
+   d2f7637 exists; check if the transition COPY (the actual
+   prompt bodies) and the field-validation rules (e.g. min/max
+   age accepted, height parsing tolerances, profession field
+   trimming) are pinned separately. Each user-visible string
+   the state machine emits is a 10DLC carrier-compliance hazard
+   if it drifts. **PROBABLY THE BEST NEXT TARGET.**
+2. `src/onboarding/prisma-deps.ts` if it exists — same
+   structural pattern as milestones/prisma-deps: the
+   behavioural tests probably ignore the upsert/update wire
+   format. Worth a `Glob` + `git log` check.
+3. `src/twilio/client.ts` — only 3 tests currently. Outbound
+   API surface (TwiML-vs-direct, MMS MediaUrl support, signature
+   verification on inbound paths) may be undertested at the
+   contract level. Worth a `wc -l` + `Glob tests/twilio/`
+   triage before committing time.
+4. `src/matching/persist.ts` (if it exists; check `Glob
+   src/matching/`) — the matching/persist path is what writes
+   matchCount: 1 on the first match for a pair. The decisions
+   contract pins note that the resolve flow writes matchCount: 2
+   for the continuation; the persist path's wire format is
+   probably the dual seam.
+
+Don't go after this list mechanically — re-evaluate each run.
+Project is now 55 test files / 922 tests; a fresh `Glob` of
+`*.contract.test.ts` plus `git log --oneline | grep -i contract`
+should be the first move for the next agent.
+
 ## 2026-06-07 ~03:08 UTC — contract pins for src/invites/code.ts (Crockford alphabet, normalize/well-formed asymmetry, display format)
 
 Hourly fire. `BUILD_COMPLETE` is still in force (committed
