@@ -4772,3 +4772,131 @@ Project is now 54 test files / 909 tests; a fresh `Glob` of
 `*.contract.test.ts` plus `git log --oneline | grep -i contract`
 should be the first move for the next agent to see what's already
 covered.
+
+---
+
+## 2026-06-07T12:11Z — onboarding/flow.ts COPY + parser-rejection + GENDER_MAP + numeric-boundary + email-domain regex pins
+
+**Where I picked up.** BUILD_COMPLETE still in force; GOAL.md fully
+checked off. Last run (0671cb9) pinned `milestones/prisma-deps.ts`.
+The handoff at the previous tail flagged onboarding state-machine
+COPY as the next under-pinned seam: "Each user-visible string the
+state machine emits is a 10DLC carrier-compliance hazard if it
+drifts." That's exactly the right pin — flowContract.test.ts
+already pins structural invariants (step coverage, walk, merge),
+but the actual SMS-visible bytes were unpinned, and so were the
+parser-rejection reason strings, gender synonym table, and
+numeric boundary semantics.
+
+**File added:** `tests/onboarding/flowCopyContract.test.ts`
+(+53 tests). Pins 5 categories:
+
+1. **Exact COPY bodies (15 strings)** — every entry in the COPY
+   object pinned verbatim. These are what we send over SMS in
+   response to onboarding steps. The campaign's registered sample
+   messages (when registration goes through — see USER_TODO.md)
+   must match these. Substring regex won't catch cosmetic drift
+   that changes the campaign reviewer's audit but passes /welcome/i.
+   - Plus a closed-set check on Object.keys(COPY) to catch
+     additions/renames.
+
+2. **Parser-rejection reason strings (19 reasons across 12
+   parsers)** — these are inline string literals in
+   `parseInviteCode` / `parseDisplayName` / `parseAge` /
+   `parseGender` / `parseProfession` / `parseHeightCm` /
+   `parsePhoto` (which uses COPY.askPhotoNeedsImage so I pin both
+   sides via identity) / `parsePreferredGenders` (including the
+   interpolation template `"X" isn't one I recognize...`) /
+   `parseMinAge` / `parseMaxAge` / `parseTypeDescriptor` /
+   `parseCampusEmailDomain`. Probed via `advance(step, body).reply`
+   on the rejection path.
+
+3. **GENDER_MAP synonym surface** — pinned the full accepted set
+   (WOMAN/W/F/FEMALE, MAN/M/MALE, NONBINARY/NB/ENBY, OTHER) via
+   `parseGender` as a black-box. Both upper and lower case round
+   trip. Negative coverage on plausible candidates (GUY/GIRL/BOY/
+   TRANS/AGENDER/X/Q + CTIA YES/Y/NO/N) that must NOT collide.
+
+4. **Numeric boundary semantics** — for every range:
+   - ask_age: [18, 99] inclusive both ends
+   - ask_min_age: [18, 99]
+   - ask_max_age: [18, 120] — asymmetric on purpose (lets users
+     open up; min-age stays bounded). Pinned with a comment so
+     the asymmetry is recorded.
+   - ask_height_cm: [120, 230]
+   - ask_display_name: trim length [1, 40]
+   - ask_profession: trim length [1, 80]
+   - ask_type_descriptor: trim length [3, 400]
+   - Plus: parseInt's permissive trailing-junk behaviour ("25abc"
+     → 25, "175cm" → 175) is pinned so a future swap to Number()
+     is deliberate, not silent.
+
+5. **Email-domain regex behaviour** — boundary cases for
+   `/^[a-z0-9-]+(\.[a-z0-9-]+)+$/`:
+   - bare lowercase + uppercase folding + email extraction
+   - multi-label + hyphenated labels accepted
+   - no-dot rejected, underscores rejected (DNS-but-stricter),
+     spaces / `+` rejected
+   - SKIP/NONE/N/A all accepted as the opt-out token at this
+     terminal step (case-insensitive) — pinned because losing
+     any of them would silently strand users at the last
+     question.
+
+**Verified.**
+- `npm install` — clean (321 packages).
+- `npx prisma generate` — clean.
+- `npm run typecheck` — clean.
+- `npm run lint` — clean.
+- `npm test` — **975/975** across 56 files (was 922/55 before
+  this run, +53 from the new file).
+- `npm run build` — clean.
+
+**What I did NOT change.** Source code untouched. No new state,
+no schema changes, no behaviour edits — every pin is a black-box
+probe of existing behaviour, asserted exactly so future drift is
+loud at PR time rather than silent in production.
+
+**Cross-module dependencies pinned implicitly.** The COPY object's
+key set is now closed — adding a key requires updating this test
+in the same commit. The advance() switch in flow.ts also branches
+on `currentStep === "ask_invite_code" && !cfg.invitesRequired`,
+which the pass-through pin in flowContract.test.ts already
+covers; this file complements that without overlapping.
+
+**For the next agent.** Same standing advice from the prior tail
+applies: BUILD_COMPLETE is in force; only a human can disable
+the hourly trigger; prefer a real contract-pin seam over a no-op
+commit. Updated priority list (the previous tail's #1 and #4 are
+now done):
+
+1. ~~`src/milestones/depth.ts`~~ — DONE (f3dc486)
+2. ~~`src/milestones/prisma-deps.ts`~~ — DONE (0671cb9)
+3. ~~`src/onboarding/flow.ts` COPY + rejections~~ — DONE (this run)
+4. `src/rematch/index.ts` eligibility result-shape and enum
+   surface — eligibility.test.ts covers behaviour but the
+   EligibilityReason enum string values ("never_matched" |
+   "cooldown_elapsed" | "had_discard" | "within_cooldown") and
+   the `DEFAULT_REMATCH_CONFIG.rematchCooldownDays ===
+   DEFAULT_SELECTOR_CONFIG.rematchCooldownDays` cross-module
+   identity may not be pinned. `Glob tests/rematch/` and read
+   the existing 3 files first.
+5. `src/decisions/resolve.ts` — wait, that's flow.ts/resolve()
+   in this project, and flowContract.test.ts pin #5 already
+   covers positional-input echo. The 3×3 outcome table itself
+   (KEEP/MAYBE/DISCARD × same → outcome) may still benefit
+   from an exhaustive truth-table pin. Check
+   `tests/decisions/flow.test.ts` for what's covered before
+   adding.
+6. `src/twilio/conversation.ts` — has a contract pin already
+   (78ea945) for precedence and shapes, but the actual relay
+   COPY (the "your match said..." templates) may not be pinned
+   verbatim. Same 10DLC reasoning as onboarding.
+7. `src/safety/statFishing.ts` — has detector contract (0d78832)
+   but the friction-reply COPY (what we tell the user when we
+   reject a stat-fishing question) may be inline string
+   literals not pinned.
+
+Don't go after this list mechanically — re-evaluate each run.
+Project is now 56 test files / 975 tests; a fresh
+`git log --oneline | grep -i contract | head -30` should be the
+first move for the next agent to see what's already covered.
