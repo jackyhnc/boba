@@ -3736,3 +3736,175 @@ worth a future run, in rough order of impact:
 Don't go after this list mechanically — re-evaluate the seam each
 run. If a refactor lands between now and the next firing that
 moves things around, the priorities shift.
+
+## 2026-06-07T00:13Z — contract pins for twilio/routes.ts (webhook surface invariants)
+
+**State.** GOAL.md still fully checked; `BUILD_COMPLETE` still in
+force; hourly routine still firing (only a human can disable). Standing
+advice continues: BUILD_COMPLETE → seek a real seam, not an empty
+commit. Today's seam: `src/twilio/routes.ts` — the Twilio webhook
+surface. Previous agent had it as the #2 priority on the hand-off list
+(behind `twilio/conversation.ts`, which they shipped). The behavioural
+test (`routes.test.ts`) covers 20 happy-path scenarios; the structural
+invariants of the webhook surface itself were not pinned.
+
+**Container-state housekeeping.** Container started on detached HEAD
+at 78ea945 (the previous agent's last commit, `conversation.ts`
+contract pins). Local `origin/main` reported "up to date" but
+`git fetch origin main` revealed origin had advanced 17 commits since
+clone — the same stale-tracking-ref pattern the previous agent flagged.
+Fast-forwarded `main` to origin/main, then committed on top. Always
+fetch before trusting tracking refs in this container.
+
+**What I picked.** Seven contract families, each pinning an invariant
+that the existing behavioural file cannot observe by construction:
+
+1. **Twilio retry-safety response shape.** Every accepted POST must
+   return exactly `200 / text/xml / EMPTY_TWIML`. Twilio retries on
+   non-2xx (re-delivering the inbound and creating a duplicate Message
+   row); and ANY non-empty TwiML body causes Twilio to send a SECOND
+   SMS to the user (the auto-reply behaviour). A refactor that
+   "improves" the response to `{ ok: true }` JSON, or to a
+   `<Response><Message>...</Message></Response>` for clarity, would
+   silently double-deliver our outbounds or duplicate every inbound.
+   The previous behavioural tests only asserted statusCode 200 + a
+   substring of the body; pinning the bit-exact body + the exact
+   `text/xml` content-type closes the gap.
+
+2. **Signature verification happens BEFORE any DB call.** Pinned via
+   a `throwingDb` Proxy that explodes on every method access: any
+   refactor moving a Prisma call (e.g. `findUserByPhone`,
+   `loadActiveMatchForUser`, the auto-provision `user.create`) ahead
+   of the signature check surfaces as a 500 from the throw instead
+   of the expected 403. Today the order is correct (signature first
+   at routes.ts:96), but the "rejects an unsigned request" test in
+   the behavioural file doesn't pin it — the DB it injects there
+   never gets called on the happy path either, so the ordering is
+   invisible. A spoofed inbound today goes nowhere; a refactor that
+   reorders could let a spoofed inbound auto-provision a stranger's
+   phone into the user table.
+
+3. **Response-shape matrix for the error paths.** Pinned exact
+   triples for `200/text/xml/EMPTY_TWIML`, `400/text/plain/"missing
+   From/Body"`, `403/text/plain/"invalid signature"`, `204/empty`,
+   and the symmetric pairs for the status endpoint. Content-type
+   drift (text/xml → application/json) wouldn't break any existing
+   test but would break Twilio's webhook-response parsing in their
+   dashboards.
+
+4. **TWILIO_REQUIRE_SIGNATURE=true with no auth token MUST reject.**
+   This is the production fail-closed gate that render.yaml relies
+   on: it ensures a missing TWILIO_AUTH_TOKEN secret rejects every
+   inbound rather than silently dropping into the dev-mode skip
+   branch. The behavioural file only covers the inverse pair (token
+   set + bad sig → reject; no token + REQUIRE=false → skip); the
+   "no token + REQUIRE=true" branch was unpinned and is the most
+   likely thing to break under a "simplify the boolean OR"
+   refactor.
+
+5. **Signature URL composition uses PUBLIC_WEBHOOK_BASE_URL + req.url,
+   not req.host.** Behind a proxy, Fastify reports the internal
+   listener as `req.host` (e.g. `localhost:80`) while Twilio signed
+   the public URL. A refactor that "cleans up" the URL composition
+   to `${req.protocol}://${req.hostname}${req.url}` would break
+   every signed inbound in production. Pinned by signing against a
+   PUBLIC_WEBHOOK_BASE_URL value distinct from the inject default,
+   and separately by signing against a base URL with a trailing
+   slash (so dropping the `.replace(/\/$/, "")` normalisation
+   surfaces too).
+
+6. **STOP/HELP from an unknown phone do NOT auto-provision a user
+   row.** HELP is already pinned in `routes.test.ts`; STOP is the
+   symmetric case and was not. Wrong-number STOPs are common; auto-
+   provisioning would pollute the user table and inflate the
+   carrier-perceived opt-out rate (which affects 10DLC trust
+   scores). Pinned the positive case (a non-keyword "hi" from an
+   unknown phone DOES auto-provision) alongside, so the intent is
+   legible.
+
+7. **Exact invite-failure reply copy for all three reasons.** The
+   behavioural file covers `unknown_code` via a regex. The
+   `already_redeemed` and `self_already_redeemed` branches were
+   unpinned — a copy edit that accidentally swapped the two replies
+   (very different tones: "Got another?" vs. "we'll keep onboarding
+   moving") would ship unnoticed. Setting up the
+   self_already_redeemed branch required reading
+   `invites/prisma-deps.ts:32-50` carefully: the user must have
+   ALREADY redeemed a DIFFERENT code and now be texting a fresh
+   unredeemed one, not re-texting the code they already own. The
+   re-text-same-code path is happy-path (returns ok:true and re-
+   sends the ask_display_name question). Documented inline so the
+   next agent doesn't fall into the same trap.
+
+**Shipped.** `tests/twilio/routesContract.test.ts` — 19 tests across
+6 describe blocks, all green. Structure mirrors the
+`conversationContract.test.ts` convention the previous agent
+established (named explanatory describes, exact-body pins for any
+contract that crosses an external boundary).
+
+**Crockford-alphabet trap.** First attempt used `USED1234` and
+`SELF1234` as fixture invite codes — both fail `isWellFormed()`
+because U and L are excluded from the Crockford base32 alphabet
+(`0123456789ABCDEFGHJKMNPQRSTVWXYZ`). The router rejects them
+upstream at `parseInviteCode` with the
+"That doesn't look like a Boba invite code" reply, before the
+redemption logic runs. Switched to `REDX1234` / `SAMX1234` /
+`PRVX1234` — all valid Crockford. Worth remembering for any future
+invite-related fixture.
+
+**Verified.**
+- `npm install` — fresh `node_modules`, 321 packages.
+- `npm run typecheck` — clean.
+- `npm run lint` — clean.
+- `npm test` — **791/791** across 49 files (6.43s), +19 from the
+  new file (was 772/772).
+- `npm run build` — clean.
+
+**Why this isn't make-work.** Three of the asserted invariants would
+not be caught by the existing 20-test behavioural file:
+
+- A refactor that flips the boolean in
+  `verifyInboundSignature` so `!env.TWILIO_AUTH_TOKEN` + REQUIRE=true
+  skips instead of rejects (e.g. by inverting the `if` for
+  "readability") would pass every existing test. The production
+  fail-closed test in this file catches it.
+- A refactor that returns `{ ok: true }` JSON for accepted inbounds
+  ("more REST-y") would pass every existing test (which only
+  checks statusCode + body substring). The exact-TwiML pin catches
+  it; Twilio would auto-reply on the malformed-but-accepted body
+  in prod.
+- A refactor that moves the user lookup ahead of signature check
+  (because "we need the user for the log line") would pass the
+  "reject unsigned" test because that test's DB happens to not be
+  called on the rejection path. The throwingDb pin catches it
+  immediately.
+
+All three are bugs that hide until they cost real money or a
+real account.
+
+**For the next agent.** Same standing advice: BUILD_COMPLETE is in
+force; only a human can disable the hourly trigger; prefer a real
+contract-pin seam over a no-op commit. Updated priority list
+(refreshing the previous agent's hand-off — top item shipped this
+run, demote it):
+
+1. ~~`src/twilio/conversation.ts`~~ — DONE (78ea945)
+2. ~~`src/twilio/routes.ts`~~ — DONE (this run)
+3. `src/decisions/flow.ts` — end-of-day resolution table. The 3×3
+   keep/maybe/discard matrix is exactly the kind of thing that
+   benefits from an exhaustive structural pin. `decisions/` already
+   has a `contract.test.ts` sibling — read it first to see what's
+   covered before duplicating.
+4. `src/safety/moderation.ts` — profanity/harassment detection
+   stubs; the category labels are the contract.
+5. `src/matching/selector.ts` — the selection invariants (no
+   self-pair, no-repeat-except-rematch, deterministic-given-seed).
+6. `src/milestones/depth.ts` — the depth-signal scoring formula
+   pins (length weight, question-ratio coefficient, clamping).
+7. `src/invites/code.ts` — code generation alphabet (the Crockford
+   trap above is direct evidence this is undertested at the
+   structural level), length, and collision-rejection contract.
+
+Don't go after this list mechanically — re-evaluate each run. The
+project has 49 test files and 791 tests now; a fresh `Glob` of
+`*Contract.test.ts` should be the first move for the next agent.
