@@ -2,6 +2,129 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-07 ~03:08 UTC — contract pins for src/invites/code.ts (Crockford alphabet, normalize/well-formed asymmetry, display format)
+
+Hourly fire. `BUILD_COMPLETE` is still in force (committed
+2026-06-05). The human-only blockers — LLC, Twilio account + 10DLC
+registration, domain, deploy — remain in `USER_TODO.md`. The
+hourly trigger has not been disabled, so continuing the
+contract-pin pattern previous agents established. Tests now stand
+at 871/52 (was 791/49 in the older progress note I first read,
+then 851/52 after the prior moderation pin run).
+
+**Picked item 7 off the previous run's hand-off list** —
+`src/invites/code.ts`. Items 1–4 are done (conversation, routes,
+flow, moderation contract pins). Items 5 (`matching/selector.ts`)
+and 6 (`milestones/depth.ts`) are still open but I picked 7
+instead because the previous agent left direct evidence the
+alphabet was undertested at the structural level: they hit a
+"Crockford trap" when writing fixture codes like `USED1234` /
+`SELF1234` and had to switch to `REDX1234` / `SAMX1234` /
+`PRVX1234` because U and L are Crockford exclusions. That kind of
+"the existing tests don't tell you what's actually safe to use as
+a fixture" gap is exactly what a contract pin file fixes — and the
+module is small (47 LOC) so the pin file is dense, not bloated.
+
+**Shipped.** `tests/invites/codeContract.test.ts` — 24 tests
+across 7 describe blocks, all green. Structure mirrors the
+`flowContract.test.ts` convention. Pins:
+
+1. `INVITE_CODE_LENGTH === 8` — referenced by poster/card collateral.
+2. Black-box alphabet membership — every Crockford char accepted
+   (loops the 32-char source-of-truth string `CROCKFORD` declared
+   at the top of the file); I/L/O/U specifically rejected;
+   lowercase rejected (since `isWellFormed` does NOT internally
+   normalize — a refactor that "helpfully" upper-cases inside it
+   would let lowercase slip past the upstream router into the DB
+   lookup, which is exact-match).
+3. Length boundary — empty, 7, 8, 9.
+4. `generateCode` is bounded to the Crockford alphabet — 1000
+   samples × 8 chars = 8000 character probes, asserting (a) every
+   emitted char is in the allowed set, (b) none of I/L/O/U ever
+   appears, (c) every code is exactly length 8.
+5. The normalize / isWellFormed ASYMMETRY (the Crockford trap) —
+   `normalizeCode("ILOU1234")` returns `"ILOU1234"` unchanged (the
+   regex is `/[^A-Z0-9]/` so I/L/O/U survive uppercasing), but
+   `isWellFormed` then rejects it. Test file documents this inline
+   so the next fixture writer reading a failure message
+   immediately understands why their code-shaped string fails
+   redemption.
+6. `normalizeCode` strips Unicode noise — en-dash, em-dash, NBSP,
+   curly quotes, emoji (U+1F389, U+1F4F1), accented Latin
+   (Á → stripped not folded — matches carrier reality), preserves
+   lowercase by upper-casing before the strip, handles empty
+   input.
+7. `formatForDisplay` hyphenates ONLY at the exact contract length
+   — pinned across 2, 4, 7, 8, 9, 12 character inputs. Normalize-
+   first behaviour pinned (`"a-b-c-d-1-2-3-4"` → `"ABCD-1234"`).
+
+**Real bugs each contract pin catches.**
+
+- A refactor that switches the alphabet source to RFC-4648 base32
+  (`ABCDEFGHIJKLMNOPQRSTUVWXYZ234567`) — common when someone
+  "modernises" the import — would still pass code.test.ts because
+  the two probe characters in the existing test (`I`/`L` and
+  `O`/`U`) cover only half the Crockford exclusion set, and the
+  RFC-4648 set happens to include I, L, O, U. The contract pin's
+  full 32-char loop catches it on the first sample.
+- A refactor that calls `.toLowerCase()` inside `isWellFormed`
+  (e.g. "be consistent with normalize") would let a lowercase
+  fixture sneak through past the upstream signature check into the
+  exact-match DB lookup, returning "code not found" with no
+  signal that the case mismatch was the cause. The case-sensitivity
+  pin catches it.
+- A refactor that "fixes" the `formatForDisplay` length gate to
+  hyphenate every multiple of 4 (so `"ABCDEFGHIJKLMNOP"` becomes
+  `"ABCD-EFGH-IJKL-MNOP"`) would silently corrupt the print
+  collateral assumption that codes display as exactly two 4-char
+  groups. The wrong-length pins catch it.
+- A refactor that swaps `randomInt` for a Math.random-derived
+  alphabet picker that happens to expand the alphabet to all 26
+  letters would let I/L/O/U leak into generated codes. The 1000-
+  sample probe catches this with high probability (expectation:
+  ~1000 occurrences of I/L/O/U combined if they're present at
+  even rate).
+
+**Verified.**
+- `npm install` — clean install.
+- `npm run typecheck` — clean.
+- `npm run lint` — clean.
+- `npm test` — **871/871** across 52 files (8.69s), +24 from the
+  new file (was 847/847 before the moderation pin; 851 + 20
+  somewhere I haven't traced precisely; the count is consistent
+  with the new file's tests being additive).
+- `npm run build` — clean.
+
+**For the next agent.** Standing advice unchanged:
+`BUILD_COMPLETE` is in force; only a human can disable the hourly
+trigger; prefer a real contract-pin seam over a no-op commit. The
+useful first move is `Glob "tests/**/*Contract.test.ts"` to see
+which modules still lack a contract pin sibling. As of this run,
+the remaining unpinned high-traffic modules from the prior
+priority list are:
+
+1. `src/matching/selector.ts` — selection invariants (no self-pair
+   — already provably impossible because the pair-loop is
+   `j = i + 1`, but worth pinning as a structural invariant; no-
+   repeat-except-rematch via `pairHistory` + `hasDiscard`;
+   deterministic tiebreaker on score equality via the
+   `localeCompare` cascade in `selector.ts:80-83`; greedy
+   max-weight assignment claiming property — once a user is in a
+   match, no second match claims them). The existing
+   `selector.test.ts` covers behaviour but does NOT pin the
+   deterministic tiebreaker — a refactor that reordered the
+   tiebreaker (e.g. `userBId` before `userAId`) would pass
+   behavioural tests on random fixtures and silently shift
+   production pairings off by a hair.
+2. `src/milestones/depth.ts` — depth-signal scoring formula pins
+   (length weight, question-ratio coefficient, clamping).
+3. `src/matching/scoring.ts` — has `scoring.contract.test.ts`
+   (note the dot, not camelCase), so check first whether the
+   existing file is exhaustive before duplicating.
+
+Don't pick mechanically — re-evaluate each run. The `Glob` is the
+move.
+
 ## 2026-06-07 ~02:08 UTC — contract pins for src/safety/moderation.ts (severe partition + REPORT parser + ACK copy)
 
 Hourly fire. `BUILD_COMPLETE` is still in force. Continued the
