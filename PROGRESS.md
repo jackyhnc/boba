@@ -2,6 +2,161 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-07T18:11 — contract pins for `src/invites/prisma-deps.ts` (redemption result shape, reason enum, $transaction wrap, query shapes, idempotency no-write, dual-surface collision detection, label propagation)
+
+**Context.** BUILD_COMPLETE remains in force. Most contract-pin candidates
+from the prior tail's priority list are now closed (depth.ts, prisma-deps
+milestones, onboarding/flow COPY, rematch surface, twilio/conversation
+COPY all shipped in earlier hourly runs). Two of the named candidates
+turned out to already be covered: statFishing friction-reply COPY lives
+inside `prependedWarning()` in `src/twilio/conversation.ts` and was pinned
+verbatim in ff3fb49; the `decisions/flow.ts resolve()` truth table is
+exhaustively covered by `flow.test.ts` lines 36-54 (the 6 DISCARD cases,
+4 non-DISCARD combos, and 3 pending cases — every behaviourally distinct
+class) plus `flowContract.test.ts` lines 251-264 which iterates the full
+4×4 grid for positional input echo. No untested cells of the truth
+table remained.
+
+**Stranding sweep.** Inherited detached-HEAD pointing at `ff3fb49`; local
+`main` was stale at `9f7307b` (clone-time tracking). `git fetch origin`
+showed origin/main already at `ff3fb49` — the same false-alarm pattern
+ec8141c diagnosed two weeks back. Fast-forwarded main, no recovery
+commit needed, no force-push.
+
+**What shipped.** New file `tests/invites/prismaDepsContract.test.ts`
+(25 tests, +0 source lines). Pins nine seams `redeem.test.ts` didn't
+hold:
+
+1. **InviteRedemption discriminated-union shape** — success branch is
+   exactly `{ ok: true, inviteId: string }`, failure is exactly
+   `{ ok: false, reason: <enum> }`, no orphan keys on either side, and
+   each branch refuses the other's field (`"reason" in successResult`
+   is false; `"inviteId" in failureResult` is false). Catches flat-
+   envelope refactors that would still pass `toEqual` shape checks but
+   break exhaustive narrowing in the consumer.
+
+2. **Reason enum cross-module identity** — three literal strings
+   (`"unknown_code"`, `"already_redeemed"`, `"self_already_redeemed"`)
+   pinned both by behavioural probe AND by a type-level identity
+   assertion through the canonical `InviteRedemptionFailure` import from
+   `src/invites/types.ts`. Pinned the size of the union at exactly 3.
+   The crucial out-of-module consumer is `inviteFailureReply()` in
+   `src/twilio/routes.ts:482-493`, which has an INLINE re-declaration of
+   the union — meaning if a fourth reason ever gets added in
+   `invites/types.ts`, the routes.ts switch silently falls through to
+   `never` and the user sees an empty SMS at the worst moment in
+   onboarding. This test forces a same-commit update.
+
+3. **$transaction wrap is mandatory** — pinned via a counting spy that
+   asserts `prisma.$transaction` is called exactly once per `redeemCode`
+   invocation, including on the `unknown_code` failure path. The existing
+   fake collapses `$transaction` to a direct call-through, which means
+   the `tx` wrap could be deleted in source without any current test
+   failing. Without the wrap, two users racing on the same fresh code
+   both see `redeemedById: null` and both succeed.
+
+4. **Prisma query shape narrowing** — `findUnique` projects exactly
+   `{id: true, redeemedById: true}` and filters by `{code: <normalized>}`;
+   `findFirst` projects exactly `{id: true, code: true}` and filters
+   `{redeemedById: <userId>}`; `update` writes exactly
+   `{redeemedById, redeemedAt: Date}` scoped to `{id}`. Widening drift
+   would silently bloat every redemption (potentially leaking fields
+   the router shouldn't see); narrowing past these names breaks the
+   code path. Pinned by spy.
+
+5. **Normalize-on-the-way-in** — pinned that the query layer receives
+   uppercase, separator-stripped codes, not the raw user input. A
+   refactor that pushed normalization into a case-insensitive column
+   index would change the contract: clients downstream of the function
+   would see cached keys in raw form instead of canonical.
+
+6. **Idempotency is a true no-op write** — when the same user re-submits
+   their already-redeemed code, the count of `update` calls is zero.
+   The existing test only checks `redeemedAt` is preserved, but an
+   `update({ data: { redeemedById: same, redeemedAt: same } })` would
+   pass that check while writing a row (audit triggers, replication
+   bytes, change-data-capture all observe the write). Pinned the
+   no-write directly via spy count.
+
+7. **createInvite has TWO collision surfaces** — typed
+   `err.code === "P2002"` (the Prisma-default path) AND
+   `/unique/i.test(message)` (the untyped fallback for drivers that lose
+   the structured code envelope). The existing test only forces P2002
+   with the `code` property set, leaving the regex branch dead-coded.
+   This pin force-throws errors with no `.code` field and a "Unique
+   constraint" message — and a mixed run of typed + untyped collisions
+   in the same retry loop. Also pinned the regex `i` flag (matches
+   "UNIQUE" case).
+
+8. **Non-collision errors bypass retry** — a generic `connection
+   refused` error is re-thrown on the FIRST attempt (no retry loop
+   wasting attempts on a real DB outage). Asserted exactly one `create`
+   call before the throw escapes.
+
+9. **createManyInvites label propagation** — the label flows through to
+   every row, not just the first. Null label propagates as null (not
+   coerced to undefined or empty string). Generated codes are pairwise
+   distinct across N=8 rows.
+
+Plus a tenth structural pin: `countUnredeemed` uses the documented
+predicate `where: { redeemedById: null }` (vs e.g. `redeemedAt: null`,
+which is a related-but-distinct condition).
+
+**Verified.**
+- `npm install` — clean.
+- `npx prisma generate` — clean.
+- `npm run typecheck` — clean.
+- `npm run lint` — clean.
+- `npm test` — **1053/1053** across 59 files (was 1028/58 before this
+  run, +25 from the new file).
+- `npm run build` — clean.
+
+**What I did NOT change.** No source files touched. No schema changes,
+no behaviour edits — every pin is a black-box probe of existing
+behaviour, asserted exactly so future drift is loud at PR time rather
+than silent in production.
+
+**For the next agent.** BUILD_COMPLETE remains in force; only a human
+can disable the hourly trigger by removing the routine in the dashboard.
+Updated priority list for next session — the prior tail's items 5
+(decisions/flow.ts truth table) and 7 (statFishing COPY) were both
+checked and confirmed already covered, so they roll off:
+
+1. `src/twilio/routes.ts` `inviteFailureReply()` COPY — the three
+   user-facing SMS bodies for invite-redemption failures live INLINE
+   in routes.ts:482-493, not in any COPY constant. A typo or rewording
+   would slip past `routesContract.test.ts` (which covers webhook
+   surface invariants, not body text). Worth a verbatim pin since these
+   are the first words a misclicked user sees.
+2. `src/safety/prisma-deps.ts recordReport` was pinned in 10385ae but
+   the `Report` schema's `subjectId`/`reporterId` FK constraints are
+   not behaviourally locked anywhere — a swap in the column meaning
+   would compile. Probably wait for production data before pinning.
+3. `src/admin/auth.ts` header name `"x-admin-token"` is part of the
+   admin-client contract. `auth.test.ts` covers behaviour but a rename
+   to `"authorization"` or `"x-admin-key"` would compile and the tests
+   pass via test-helper coupling. Worth pinning that the function
+   reads from that specific header key. Also the error response body
+   shape `{ error: "admin disabled" | "unauthorized" }` is a client-
+   parsed contract.
+4. `src/scheduler/runDailyMatch.ts` was pinned in ed3e94b for the
+   stranded-user durability invariant, but the actual SMS body it
+   delivers (the "your match is here" announcement) may not be
+   verbatim-pinned anywhere.
+5. `src/onboarding/flow.ts` had its COPY surface pinned in 1332f80,
+   but the `advance()` state-machine TRANSITIONS — which step follows
+   which on success vs rejection — are only covered behaviourally,
+   not enumerated. A reordered onboarding sequence would compile and
+   pass each individual parser test while sending users through the
+   wrong door.
+
+Don't go after this list mechanically — re-evaluate each run. Project
+is now 59 test files / 1053 tests; a fresh `git log --oneline | grep
+-iE 'contract|pin' | head -30` should be the first move for the next
+agent to see what's already covered, and `git ls-files
+'tests/**/*ontract*.test.ts'` lists the pin files directly (currently
+24 of them).
+
 ## 2026-06-07T17:07 — verbatim COPY contract pins for `src/twilio/conversation.ts` (router-emitted SMS bodies + prependedWarning template)
 
 **Context.** BUILD_COMPLETE is in force; GOAL.md fully checked. The hourly
