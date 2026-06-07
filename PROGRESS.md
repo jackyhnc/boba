@@ -2,6 +2,155 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-07T16:08 — contract pins for rematch module SURFACE (EligibilityReason enum, EligibilityResult shape, cross-module cooldown identity, pairKey re-export)
+
+**Why this seam.** Previous tail's priority list item #4:
+`src/rematch/index.ts` eligibility result-shape and enum surface.
+Confirmed via `git log --oneline | grep -iE 'rematch|eligibility'` —
+the rematch module already has three test files
+(`eligibility.test.ts`, `contract.test.ts`, `prismaContract.test.ts`)
+covering BEHAVIOUR, CROSS-MODULE AGREEMENT, and QUERY SHAPE
+respectively, but the module **SURFACE** itself was unpinned:
+
+1. **`EligibilityReason` string union has runtime consequences.**
+   TypeScript erases the union; the strings end up in logs,
+   admin-API responses, and (plausibly) serialized analytics
+   columns. A silent rename `"had_discard"` → `"discarded"` would
+   break log queries with zero test failure.
+
+2. **`DEFAULT_REMATCH_CONFIG.rematchCooldownDays` is defined as a
+   REFERENCE** to `DEFAULT_SELECTOR_CONFIG.rematchCooldownDays`
+   (src/rematch/index.ts:33). The module's whole purpose is to be
+   the canonical home of the rule the selector ALSO enforces — a
+   refactor that hardcoded `14` here would not break any test even
+   if `SelectorConfig` later changed to 21.
+
+3. **`EligibilityResult` shape is exactly 3 fields.** Over-fetching
+   (e.g. echoing the input history as a 4th field) would be a
+   silent API expansion.
+
+4. **`pairKey` is re-exported** from `../matching/selector.js`
+   (last line of index.ts). The re-export must be the SAME
+   function identity, not a wrapper, so cross-module key equality
+   holds.
+
+**What I shipped.** One new file: `tests/rematch/surfaceContract.test.ts`
+(+29 tests, +346 lines, 0 source changes). Six describe-blocks:
+
+1. **EligibilityReason — string surface is closed and exact.**
+   Pins the alphabetized set `["cooldown_elapsed", "had_discard",
+   "never_matched", "within_cooldown"]` (exactly 4). Round-trips
+   each reason through `isEligibleForRematch` to prove every
+   listed reason is REACHABLE via the documented input combination
+   (not just type-asserted). Crucially, the `had_discard` test
+   uses a history that WOULD be `cooldown_elapsed` if not for the
+   discard — pinning PRECEDENCE, not just labels.
+
+2. **EligibilityResult — shape is exactly {eligible, reason,
+   cooldownRemainingDays}.** For every reason path, asserts the
+   key set is exactly those 3 names alphabetized. Catches silent
+   API expansion (e.g. adding `nextEligibleAt: Date`).
+
+3. **reason ↔ eligible polarity is fixed.** Truth table: each
+   reason maps to a fixed boolean. Pins the contract that the
+   reason string alone tells the caller whether the pair passed.
+
+4. **cooldownRemainingDays invariant — only set for
+   within_cooldown.** Pins zeros for `never_matched`,
+   `cooldown_elapsed`, `had_discard` and positivity (exactly 11)
+   for `within_cooldown` at 3-days-ago + default-14-cooldown. Adds
+   a boundary probe at `daysSince = cooldown - 1 = 13` → exactly 1
+   day remaining (catches off-by-one in
+   `cfg.rematchCooldownDays - daysSince`).
+
+5. **DEFAULT_REMATCH_CONFIG — cross-module identity.** Four
+   assertions: (a) `rematchCooldownDays` mirrors
+   `DEFAULT_SELECTOR_CONFIG.rematchCooldownDays`; (b) the shared
+   value is 14 (independent pin — even if both defaults are
+   renamed, the product policy "once every two weeks" is its own
+   contract); (c) `DEFAULT_REMATCH_CONFIG` has EXACTLY one key
+   (`EligibilityConfig` is a strict subset of `SelectorConfig`);
+   (d) does NOT leak `minScore` from the selector config (a
+   refactor that copied the whole object would silently leak it).
+
+6. **Config override — shallow merge over default.**
+   `isEligibleForRematch` does `{ ...DEFAULT_REMATCH_CONFIG,
+   ...(args.config ?? {}) }`. Pinned: undefined falls back to 14,
+   `{}` falls back to 14, override takes effect AND default is NOT
+   mutated (regression to `Object.assign(DEFAULT_REMATCH_CONFIG,
+   ...)` would silently mutate). Plus edge: `rematchCooldownDays:
+   0` means every history pair is immediately re-eligible because
+   `daysSince >= 0` is true — pinning so a future
+   `cfg.rematchCooldownDays > 0` guard doesn't quietly break the
+   no-cooldown experiment use case.
+
+7. **pairKey re-export — identity with selector.** Two checks:
+   `pairKeyFromRematch === pairKeyFromSelector` (same function
+   reference, not a wrapper) AND byte-identical key strings via
+   either path. The identity check is the load-bearing one; the
+   byte-equality is defence-in-depth against someone deliberately
+   breaking the identity check and forgetting to also break
+   consumers.
+
+**Typecheck speedbump.** First draft used
+`(DEFAULT_REMATCH_CONFIG as Record<string, unknown>).minScore` —
+TS rejected because `EligibilityConfig` and `Record<string,
+unknown>` don't sufficiently overlap. Fixed by going through
+`unknown` first: `as unknown as Record<string, unknown>`. That's
+the standard escape hatch for "I'm probing this object as a bag
+of strings to assert an absence."
+
+**Verified.**
+- `npm install` — clean.
+- `npx prisma generate` — clean.
+- `npm test` — **1004/1004 across 57 files** (was 975/56 before
+  this run, +29 from the new file).
+- `npm run typecheck` — clean.
+- `npm run lint` — clean.
+- `npm run build` — clean.
+
+**What I did NOT change.** Source code untouched. No new state,
+no schema changes, no behaviour edits — every pin is a black-box
+probe of existing behaviour, asserted exactly so future drift is
+loud at PR time rather than silent in production.
+
+**For the next agent.** BUILD_COMPLETE is in force; only a human
+can disable the hourly trigger; the standing advice from prior
+tails still applies — prefer a real contract-pin seam over a
+no-op commit. Updated priority list (#4 is now done):
+
+1. ~~`src/milestones/depth.ts`~~ — DONE (f3dc486)
+2. ~~`src/milestones/prisma-deps.ts`~~ — DONE (0671cb9)
+3. ~~`src/onboarding/flow.ts` COPY + rejections~~ — DONE (1332f80)
+4. ~~`src/rematch/index.ts` eligibility surface~~ — DONE (this run)
+5. `src/decisions/flow.ts` — `flowContract.test.ts` (643c841)
+   already covers KEYWORD_MAP, CTIA non-collision, and positional
+   echo. Still potentially missing: the 3×3 `resolve()` truth
+   table (KEEP/MAYBE/DISCARD × same → `continue`/`end` outcome)
+   as a single exhaustive table-driven test. Read
+   `tests/decisions/flow.test.ts` and the `resolve` source first;
+   may already be covered.
+6. `src/twilio/conversation.ts` — has a contract pin already
+   (78ea945) for precedence and shapes, plus reveal templates.
+   The RELAY COPY itself (the "your match said..." templates,
+   typo-fix copy, hard-flag refusal copy) may not be pinned
+   verbatim. Same 10DLC reasoning as onboarding/flow.ts pins —
+   carrier scrutiny means inline string drift can cost throughput.
+7. `src/safety/statFishing.ts` — has detector contract (0d78832)
+   but the FRICTION-REPLY COPY (what we tell the user when we
+   reject a stat-fishing question) is likely still inline string
+   literals not pinned.
+8. `src/scheduler/cron.ts` — has cron contract (1e05a93) for the
+   validate-before-schedule order. The `runOnce` wrapper's logging
+   side effect (success/failure log payload shape) may not be
+   pinned; observability matters when paging on cron failures.
+
+Don't go after this list mechanically — `git log --oneline | head
+-30` first, then re-evaluate each run. Project is now 57 test
+files / 1004 tests; growth rate is healthy and each new pin
+should describe a load-bearing contract that's NOT already
+covered, not a "let's add coverage" sweep.
+
 ## 2026-06-07T11:09 — contract pins for milestones/prisma-deps.ts
 
 **Why this seam.** The previous agent's handoff listed
