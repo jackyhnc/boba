@@ -4486,3 +4486,150 @@ Don't go after this list mechanically — re-evaluate each run.
 Project is now 53 test files / 891 tests; a fresh `Glob` of
 `*.contract.test.ts` should be the first move for the next agent
 to see what's already covered.
+
+---
+
+## 2026-06-07 05:09 UTC — Contract pins: `src/milestones/depth.ts`
+
+**Context.** `BUILD_COMPLETE` is in force, full GOAL.md checklist
+checked. Continuing the defensive-pin strategy from prior runs.
+Picked item 2 from the previous agent's priority list
+(`src/milestones/depth.ts` — depth-signal scoring formula). Did a
+`Glob '**/*.contract.test.ts'` first per the handoff advice — found
+three existing files (matching/selector, matching/scoring,
+ai/persona), none covering depth, so this is genuinely new ground.
+
+**File shipped.** `tests/milestones/depthContract.test.ts` —
+18 numeric/structural pins on the depth scorer, alongside the
+behavioural `depth.test.ts` (which already pins the reciprocity
+weight at 0.25 via `toBeCloseTo(0.25, 5)` but nothing else
+numerically tight).
+
+**Why this matters in production.** Depth feeds the unlock ladder
+via `averageDepthScore`. The unlock thresholds in
+`DEFAULT_UNLOCK_THRESHOLDS` are `minAvgDepthScore: 0.3 / 0.4 / 0.5`
+for AGE/PROFESSION/HEIGHT. A ~0.05 drift in the scorer's
+coefficients silently shifts when each rung unlocks. None of the
+existing behavioural tests catch that because they use loose
+bounds (`< 0.05`, `< 0.1`, `> X`).
+
+**What's pinned (and the silent-failure mode each guards):**
+
+1. `WEIGHTS.length === 0.5` — saturated long body (10,000 chars)
+   with no q / no recip → score ≈ 0.5 to 10 decimals. A refactor to
+   `0.4` (the natural "equalize the three signals to ~1/3 each"
+   reading) would still pass the long > medium > short ordering
+   tests but would depress conversation averages by ~0.06.
+2. `WEIGHTS.question === 0.25` — same-length statement vs question
+   (51 chars each, just the trailing char differs) → delta exactly
+   0.25. The existing `>= 0.2` bound passes at 0.20 / 0.22 / 0.30.
+3. `WEIGHTS.{length,question,reciprocity}` sum to exactly 1.0 —
+   the maxed-out scenario (long+q+recip) lands on `toBe(1)`, not
+   `toBeCloseTo`. Each weight is an exact dyadic, so the sum is
+   exact in IEEE 754. A refactor that drops any weight to e.g.
+   0.45/0.30/0.20 would lose this clean clamp.
+4. Length curve is `1 - exp(-len/100)` exactly — at len=100 score
+   ≈ 0.5 * (1 - 1/e); at len=200 score ≈ 0.5 * (1 - 1/e²). Pinned
+   to 10 decimals. A swap to `/50` or `/200` would preserve the
+   ordinal ranking by length (so long > medium > short still
+   holds) but would re-score every cohort.
+5. Length scorer measures TRIMMED body, not raw — `"  hello  "`
+   scores identically to `"hello"`. A refactor that drops the trim
+   would let whitespace-padding inflate scores.
+6. Reciprocity threshold = exactly 20 chars (trimmed). Boundary
+   tested at 19 (no bump) and 20 (full +0.25 bump). A drift to 25
+   would silently suppress reciprocity on common ~20-char replies.
+7. Reciprocity uses TRIMMED body for the threshold check —
+   padded 20-char reply scores identically to clean 20-char reply.
+8. Reciprocity walks back to the FIRST other-sender message and
+   stops there. Behavioural tests cover "walks past own messages
+   to find OTHER"; this pin covers the converse — does NOT keep
+   walking past a non-question OTHER to find a question OTHER.
+   `[BOB?, ALICE, BOB-statement]` → recip = 0, NOT 1.
+9. Meaningful-question regex requires ASCII `[a-z0-9]/i` — `a?`,
+   `Z?`, `5?` all earn the question bonus exactly (+0.25 delta).
+   `~?@`, `???`, `...?` all fail it (length-only score).
+10. Non-ASCII alphabetics (CJK, accented) do NOT pass the
+    alphanumeric gate — `"你好?"` scores as length-only. This is
+    the current behaviour; pinned so a future i18n change is
+    deliberate, not accidental.
+11. Empty body returns `Object.is(s, 0) === true` — not NaN, not
+    -0. Same for whitespace-only.
+12. Whitespace-only body with a prior question still returns 0 —
+    the early-return path beats the reciprocity path.
+13. Pure function: `scoreMessageDepth(input)` twice returns
+    bit-identical output (`toBe`, not `toBeCloseTo`).
+14. Does not mutate `previousMessages` — snapshot via JSON before
+    and after the call.
+15. `averageDepthScore([])` returns `Object.is(s, 0) === true` —
+    not NaN (the length-guard early return).
+16. `averageDepthScore([{depthScore: 0.7}])` returns 0.7 exactly.
+17. `averageDepthScore` is the arithmetic mean. Pinned via two
+    cases: a balanced `[0, 0.5, 1] → 0.5` AND a skewed
+    `[0.1, 0.1, 0.1, 1] → 0.325`. The skewed case is the
+    discriminator vs. a trimmed-mean refactor (which would return
+    0.1 for the skewed input but 0.5 for the balanced).
+
+**One pin failed on first run, then fixed:**
+
+- The "punctuation-only `?` rejects" loop iterated over
+  `["~?@", "???", "...?"]`. I had pre-computed a single
+  `expectedAtLen3` constant, but `"...?"` is 4 chars, not 3. The
+  assertion failed with the actual `len=4` score against the
+  `len=3` expectation. Fix: compute `expected = 0.5 * (1 -
+  Math.exp(-body.length / 100))` inside the loop. Pin still
+  proves the same invariant — the question bonus is NOT awarded
+  to punctuation-only strings.
+
+**Verified.**
+- `npm install` — clean, 321 packages.
+- `npx prisma generate` — clean.
+- `npm run typecheck` — clean.
+- `npm run lint` — clean.
+- `npm test` — **909/909** across 54 files (8.77s), +18 from the
+  new file (was 891/891).
+- `npm run build` — clean.
+
+**Coverage map after this run.** Contract-pin files now in place:
+- `tests/ai/persona.contract.test.ts`
+- `tests/matching/scoring.contract.test.ts`
+- `tests/matching/selector.contract.test.ts`
+- `tests/milestones/depthContract.test.ts` *(this run)*
+- `tests/milestones/unlockContract.test.ts` *(pre-existing)*
+- Several `.contract.test.ts` siblings the previous logs mention:
+  `safety/smsKeywords`, `safety/moderation`, `decisions/flow`,
+  `twilio/conversation`, `twilio/routes`, `invites/code`,
+  plus the structural pin on the onboarding state machine
+  (d2f7637). These don't all use the `.contract.test.ts` suffix
+  — some are `.contract.ts` files or behavioural files with
+  pin sections; the next agent should `git log --oneline | grep
+  -i contract` rather than relying on a single Glob.
+
+**For the next agent.** Same standing advice: BUILD_COMPLETE is
+in force; only a human can disable the hourly trigger; prefer a
+real contract-pin seam over a no-op commit. Updated priority list
+(items 2/3 of the previous handoff still open or partly open):
+
+1. ~~`src/milestones/depth.ts`~~ — DONE (this run)
+2. `src/rematch/eligibility.ts` — there's a Prisma query-shape
+   pin file but the algorithmic side (eligibility decision tree)
+   may still be undertested. `Glob tests/rematch/` and
+   `git log --oneline -- src/rematch` first.
+3. `src/decisions/resolve.ts` (the 3×3 keep/maybe/discard matrix)
+   — there's a flow pin file from 643c841 but the resolve table
+   itself may still be open. Verify with `Glob`.
+4. `src/milestones/unlock.ts` already has `unlockContract.test.ts`
+   but only covers the ladder structure + boundaries; the
+   PRISMA-side accumulation logic in `prisma-deps.ts` may not
+   have a contract pin yet.
+5. `src/onboarding/state-machine.ts` — structural pin from
+   d2f7637 exists; check if the transition COPY (the actual
+   prompt bodies) and the field-validation rules are pinned
+   separately. Each user-visible string the state machine
+   emits is a 10DLC carrier-compliance hazard if it drifts.
+
+Don't go after this list mechanically — re-evaluate each run.
+Project is now 54 test files / 909 tests; a fresh `Glob` of
+`*.contract.test.ts` plus `git log --oneline | grep -i contract`
+should be the first move for the next agent to see what's already
+covered.
