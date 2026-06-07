@@ -5363,3 +5363,154 @@ Don't go after this list mechanically — re-evaluate each run.
 Project is now 56 test files / 975 tests; a fresh
 `git log --oneline | grep -i contract | head -30` should be the
 first move for the next agent to see what's already covered.
+
+---
+
+## 2026-06-07 19:08 UTC — `tests/admin/authContract.test.ts`
+
+**State on arrival.** BUILD_COMPLETE still in force, GOAL.md fully
+checked off, 1053/1053 tests across 59 files passing. HEAD was
+detached at 45ba641; local `main` and local `origin/main` tracking
+ref were both stale at 9f7307b, but `git ls-remote` confirmed the
+real remote tip is 45ba641 (everything prior agents committed has
+in fact been pushed). Re-pointed `main` at 45ba641 and re-armed
+upstream tracking so push semantics for this commit are normal.
+
+**Why this file.** Walked the priority list left by the previous
+tail and found items #4 (rematch) and #5 (decisions 3×3 truth
+table) and #7 (statFishing friction-reply COPY) are already
+covered or moot:
+
+- #4: `cf705ca` added `tests/rematch/surfaceContract.test.ts`
+  (EligibilityReason enum, EligibilityResult shape, cross-module
+  cooldown identity, pairKey re-export). Done.
+- #5: `tests/decisions/flowContract.test.ts` pin #5 already
+  iterates the full (KEEP|MAYBE|DISCARD|null)² grid and
+  asserts both `decisionA`/`decisionB` echo positionally AND
+  that `.outcome` derives correctly via `resolve()`. The 3×3
+  truth table is also covered exhaustively in
+  `decisions/flow.test.ts` for the non-null cells. No remaining
+  gap.
+- #7: `src/safety/statFishing.ts` has NO user-visible
+  friction-reply COPY — it's a pure detector returning a
+  structured result; the reply COPY ("⚠ heads up...") lives in
+  `src/twilio/conversation.ts` and is already pinned verbatim
+  in `tests/twilio/conversationCopyContract.test.ts` (ff3fb49).
+  Priority #7 was speculative; nothing to pin.
+
+That left admin/auth as the highest-value untouched contract
+surface. `tests/admin/auth.test.ts` covers happy/sad paths via
+status code only — it does not pin wire format, header lookup
+key, status-code precedence, or closure semantics. Any of those
+could drift silently and break admin clients or — much worse —
+silently grant access (e.g. a refactor that allowed
+`expected: ""` to match `supplied: ""` would create a trivial
+0-token grant on any deploy that forgot to set ADMIN_TOKEN).
+The new file targets those seams specifically.
+
+**What this commit adds.** A single new file,
+`tests/admin/authContract.test.ts`, with 25 tests organised
+into 9 contract groups:
+
+1. **Exact error body shapes** — `{ error: "admin disabled" }`
+   vs `{ error: "unauthorized" }`. Asserted both with `toEqual`
+   (full shape) AND `Object.keys(...).toEqual([...])` (no
+   silent additional fields). Also pinned that the two bodies
+   are strictly distinct (a renaming refactor that collapsed
+   them would lose the diagnostic).
+2. **Status-code precedence** — 503 short-circuits BEFORE 401.
+   Critical seam: pinned three sub-cases (empty expected +
+   non-empty supplied / empty supplied / missing header) all
+   return 503, NOT 401, NOT pass-through. The dual-empty case
+   is the dangerous-grant scenario.
+3. **Header name is exactly `x-admin-token`** — Fastify
+   normalises to lowercase, so the guard must read the
+   lowercase key. Negative coverage on `authorization`,
+   `x-admin-key`, `x-api-key`, `x-token`, `admin-token` —
+   each rejected with 401.
+4. **Case sensitivity** — `"AbCdEf"` vs `"abcdef"` rejects in
+   both directions (supplied-uppercased and expected-uppercased).
+5. **No-trim, no-strip** — trailing space, leading space, and
+   trailing `\n` on the supplied header all reject. Pins
+   against any "header sanitiser" middleware refactor.
+6. **Pass-through is zero-touch** — happy path makes EXACTLY 0
+   calls to `reply.code()` and EXACTLY 0 calls to `reply.send()`.
+   Both error paths make exactly 1+1. Tracked via a counter
+   trap so a refactor that called `reply.send()` on success
+   (consuming the reply before the route runs) would surface.
+7. **Closure semantics** — mutating `opts.expected` after
+   construction does NOT change behaviour; two guards built
+   with different tokens have independent state. Pins against
+   a "hoist expected to module scope" refactor that would
+   cause the second `makeAdminAuth` call to overwrite the
+   first guard's token.
+8. **Length-mismatched tokens return 401, do NOT throw** —
+   Node's `crypto.timingSafeEqual` throws on unequal lengths;
+   the module pads internally. A refactor that dropped the
+   padding would crash the request with an uncaught
+   RangeError instead of a clean 401. Pinned via
+   `expect(...).resolves.toBeUndefined()` so the rejection
+   path is observable as a clean async resolution, not a
+   throw.
+9. **Return shape** — `makeAdminAuth` returns an async
+   (Promise-returning) function; the same guard instance is
+   reusable across concurrent requests with independent
+   `reply` traps. Pins against any stateful refactor that
+   memoised the last reply.
+
+**Reply trap.** New `mkReplyTrap()` helper records every
+`.code()` and `.send()` call separately (as arrays) so we can
+distinguish "no call" from "called with undefined". The
+existing `tests/admin/auth.test.ts` helper only captured the
+last value, which would not catch a double-send regression.
+
+**Verified.**
+- `npm install` — clean.
+- `npx prisma generate` — clean.
+- `npx vitest run tests/admin/authContract.test.ts` — 25/25.
+- `npm test` — **1078/1078** across 60 files (was 1053/59
+  before this run, +25 from the new file).
+- `npm run typecheck` — clean.
+- `npm run lint` — clean.
+- `npm run build` — clean.
+
+**What I did NOT change.** Source code untouched. No new
+behaviour, no schema changes — every assertion is a black-box
+probe of the existing `makeAdminAuth` surface.
+
+**Operational note for the next agent.** The local `main` and
+`origin/main` tracking ref came up stale (clone tip vs actual
+remote tip diverged). `git ls-remote origin` is the cheap way
+to spot this — if `refs/heads/main` on the remote is ahead of
+local, `git fetch origin main` then
+`git checkout -B main <actual-tip>` before working. The
+fresh-clone container guarantee in the routine spec doesn't
+always hold in practice.
+
+**For the next agent.** Updated priority list — items #4, #5
+and #7 from the prior tail are now triaged out (see above).
+Remaining candidates:
+
+1. ~~`src/admin/auth.ts` wire-format contract~~ — DONE (this
+   run).
+2. `src/admin/routes.ts` — has `tests/admin/routes.test.ts`
+   but no `*Contract.test.ts`. Worth checking: the admin
+   endpoints return specific JSON shapes (list users,
+   ban/unban response envelopes, run-match output) that a
+   refactor could silently drift. Likely high-value pin
+   candidate — read both files first.
+3. `src/scheduler/runDailyMatch.ts` — `ed3e94b` already
+   added behavioural contract coverage (stranded user +
+   persist-before-notify durability); a Prisma-shape pin on
+   the persistence side-effects (which rows it writes /
+   updates / and in which order) may still be valuable.
+   Lower priority.
+4. `src/twilio/prisma-deps.ts` — `1a982cc` covers
+   10DLC-opt-out / partner orientation / direction defaults;
+   probably saturated. Skip unless a real gap surfaces.
+
+Don't go after this list mechanically — re-evaluate. Project
+is now 60 test files / 1078 tests; the priority work is
+genuinely thin on the ground. A no-op PROGRESS-only commit
+with a clear tail is a reasonable answer for future runs if
+no high-value surface remains.
