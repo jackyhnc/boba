@@ -2,6 +2,171 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-07 ~01:08 UTC — contract pins for src/decisions/flow.ts (end-of-day pure-fn surface)
+
+Hourly fire. `BUILD_COMPLETE` = `DONE` is still in force; per the
+standing playbook from prior runs the highest-leverage remaining work
+is *structural contract pins* against modules whose only coverage is
+behavioural. Previous agent named `src/decisions/flow.ts` as the
+next target (item 2 on their hand-off list, after `twilio/routes.ts`
+which they shipped last hour). Took it.
+
+**What was already there.** `tests/decisions/flow.test.ts` covers
+happy-path behaviour with regex substrings (`/keep talking/i`,
+`/continues/i`, `/ended/i`). `tests/decisions/contract.test.ts`
+exists but covers the `prisma-deps.ts` side — orderPair
+canonicalisation, AWAITING_DECISION flip semantics, FACE milestone
+upsert key. Nothing pinned the pure-fn surface of `flow.ts` itself
+(KEYWORD_MAP membership, exact COPY bodies, resolve() result
+shape, parseDecisionKeyword strictness).
+
+**Shipped.** `tests/decisions/flowContract.test.ts` — 26 tests
+across 7 describe blocks, all green. Coverage:
+
+1. **Exact COPY body pins (9 tests).** Every SMS-visible string is
+   now locked verbatim. ackKeep, ackMaybe, ackDiscard,
+   pendingForPartner, continued, endedByDiscard,
+   faceRevealWithPhoto, faceRevealNoPhoto — eight pins plus a
+   ninth that locks `Object.keys(COPY)` so no orphan string can be
+   added without surfacing in this file. A copy edit ("Got it" →
+   "Cool") would pass the existing `/keep talking/i` check; this
+   one rejects it.
+2. **KEYWORD_MAP exhaustive membership (4 tests).** Probes the
+   detector as a black box for each of the 8 documented tokens
+   (KEEP/K, MAYBE/M, DISCARD/PASS/NOPE/D) plus a 13-item negative
+   list (YES/NO/Y/N/OK/OKAY/SURE/NAH/NEVER/DROP/CONTINUE/NEXT/
+   STAY/GO). Adding YES as a KEEP synonym would silently collide
+   with the carrier START token — this is the kind of change a
+   well-meaning UX refactor might land.
+3. **No collision with CTIA STOP/HELP/START tokens (1 test, 8
+   probes).** Cross-checks every decision token against
+   `detectSmsKeyword` from `safety/smsKeywords`. The inbound
+   router runs safety FIRST; any collision makes the decision
+   synonym unreachable in prod. The cross-check lives in this
+   file rather than smsKeywords because the decision set is owned
+   here — additions land here first.
+4. **parseDecisionKeyword strictness (5 tests).** Pins:
+   - 13-item substring rejection (KEEPER/KEEPING/KEEPS, MAYBES/
+     MAYBELLINE, DISCARDED/DISCARDING/DISCARDS, PASSED/PASSING/
+     PASSES, NOPED/NOPES).
+   - Trailing-punctuation NOT tolerated (`KEEP.` → null) — the
+     deliberate asymmetry vs `detectSmsKeyword` which DOES strip
+     `[.,!?;:]+`. STOP must be honoured casually; decisions are
+     deliberate. Tested for ., !, ?, ,, ;, : across all three
+     canonical tokens.
+   - Internal whitespace splits ("KEEP IT" → null).
+   - Empty + pure-whitespace bodies return null.
+   - Leading/trailing whitespace IS tolerated (`  KEEP  ` → KEEP).
+5. **resolve() positional preservation (2 tests).** 16-cell grid
+   (4×4 over `[KEEP, MAYBE, DISCARD, null]`) asserting
+   `result.decisionA === a` and `result.decisionB === b` on every
+   combination. This is the contract `decisions/prisma-deps.ts`
+   silently depends on: it maps `decisionA/decisionB` back to
+   `(userAId, userBId)` positionally. A future refactor that
+   canonicalised order inside resolve() (to match `orderPair()`)
+   would pass `flow.test.ts` but produce data-integrity bugs —
+   wrong decisions stored against the wrong users on every match.
+   Pin also locks `Object.keys(r)` so no extra fields can be
+   added without surfacing.
+6. **Cross-wiring between replyForOwnDecision and
+   resolutionAnnouncement (4 tests).** Asserts each function maps
+   to ack* vs announcement constants by identity (`.toBe(COPY.x)`,
+   not regex). The COPY surface shares vocabulary ("ended"
+   appears in both ackDiscard and endedByDiscard; "match" appears
+   in ackDiscard and pendingForPartner), so the existing
+   `/ended/i` regex tests would pass after a swap. Adds a
+   six-string uniqueness pin so any future collision surfaces
+   before it lands as a UX bug.
+7. **faceRevealBody binary identity (1 test).** `true →
+   COPY.faceRevealWithPhoto`, `false → COPY.faceRevealNoPhoto` —
+   exact `.toBe(…)` identity, not substring. Pins that this is
+   not a template (no interpolation, no string concat) — which
+   matters because the Twilio MMS path attaches `MediaUrl`
+   separately and the body must be ready-to-send verbatim.
+
+**Verified.**
+- `npm install` — fresh `node_modules`, 321 packages.
+- `npm run typecheck` — clean (after fixing one type error — see
+  below).
+- `npm run lint` — clean.
+- `npm test` — **817/817** across 50 files (6.21s), +26 from the
+  new file (was 791/791 before).
+- `npm run build` — clean.
+
+**Type-error trap I stepped in.** First draft's six-string
+uniqueness check used `new Set([COPY.ackKeep, COPY.ackMaybe,
+COPY.ackDiscard])` — TypeScript inferred the set's element type
+as the literal union of those three specific strings (because
+COPY is `as const`), then rejected `acks.has(COPY.continued)`
+because the announcement strings aren't in the union. Two-line
+fix: `new Set<string>([...])` and `announcements: string[]`.
+Worth noting for future contract files that mix `as const`
+unions across function boundaries — vitest's `.toBe`/`.toEqual`
+on `as const` constants is fine, but `Set.has` on a heterogeneous
+collection needs an explicit widening.
+
+**Working-tree housekeeping.** Container started on detached
+HEAD at `f93df1d` (last hour's commit), local `main` 18 commits
+behind. `git fetch origin main` revealed origin/main was *also*
+at f93df1d — so all the prior contract-pin commits did reach the
+remote, the local `main` was just stale. `git checkout main &&
+git merge --ff-only origin/main` fast-forwarded cleanly; the
+untracked `tests/decisions/flowContract.test.ts` survived
+because `checkout` only touches tracked files. Committed on a
+real branch this time.
+
+**Why this isn't make-work.** Concrete examples of bugs the
+behavioural file misses but this one catches:
+
+- A copy refactor that flips ackDiscard from "Got it — match
+  ended..." to "Match ended — we'll line up someone new"
+  passes `/match ended/i` but loses the "Got it —" conversational
+  acknowledgement that anchors every ack message in the set.
+- A KEYWORD_MAP edit that adds `YES: "KEEP"` (e.g. "users want a
+  yes-shortcut!") passes flow.test.ts but renders YES unreachable
+  because the safety detector eats it as a START token first.
+  The cross-collision pin catches this in CI.
+- A resolve() refactor that pre-canonicalises `[a, b]` via
+  orderPair (e.g. "consistency with rematch path") passes
+  `.outcome` checks but corrupts every persisted decision in
+  prisma-deps. The 16-cell positional grid catches it
+  immediately.
+
+All three are bugs that hide until they cost real users.
+
+**For the next agent.** BUILD_COMPLETE is in force; only the user
+can disable the hourly trigger. Standing advice: prefer a real
+contract-pin seam over a no-op commit, but glob the
+`*Contract.test.ts` files first to see what's already covered
+before duplicating. Updated priority list (refreshing the prior
+agent's hand-off — top two now shipped, demote them):
+
+1. ~~`src/twilio/routes.ts`~~ — DONE (f93df1d, prior run)
+2. ~~`src/decisions/flow.ts`~~ — DONE (this run)
+3. `src/safety/moderation.ts` — profanity/harassment detection
+   stubs. The category labels (`profanity`, `harassment`, etc.)
+   are the contract — they key downstream metrics + report
+   schema. Pin the label set + the detector's return shape.
+4. `src/matching/selector.ts` — selection invariants (no
+   self-pair, no-repeat-except-rematch, deterministic-given-seed).
+   `scoring.contract.test.ts` already exists; check it before
+   duplicating — selection is a different surface than scoring.
+5. `src/milestones/depth.ts` — depth-signal scoring formula
+   (length weight, question-ratio coefficient, clamping range).
+6. `src/invites/code.ts` — code generation alphabet (the Crockford
+   trap noted in a previous agent's run is direct evidence this
+   is undertested at the structural level), length, collision-
+   rejection contract.
+7. `src/twilio/signature.ts` — already has a `signature.test.ts`
+   but no `*Contract.test.ts`. Twilio's signature spec is exact:
+   HMAC-SHA1, sorted-params, URL-canonicalisation. A pin file
+   that exercises wrong-order, wrong-case, wrong-canonicalisation
+   would catch refactors that "simplify" the verifier.
+
+Don't go after this mechanically — re-evaluate each run. The
+project has 50 test files and 817 tests now; a fresh `Glob` of
+`*Contract.test.ts` should be the first move for the next agent.
+
 ## 2026-06-06 ~22:09 UTC — contract pins for twilio/conversation.ts (the inbound router)
 
 Hourly fire. `BUILD_COMPLETE` = `DONE` is still in force, but per the
