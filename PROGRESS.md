@@ -2,6 +2,35 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-08 ~17:05 UTC — hourly no-op; BUILD_COMPLETE still in force
+
+Routine fired. Pre-run checks:
+
+- `BUILD_COMPLETE` = `DONE` (committed 2026-06-05; in force ~3 days).
+- `GOAL.md` checklist: 13/13 main + 9/9 launch-ready items checked.
+- `git status`: clean working tree. Found `HEAD` detached at `74b6de5`
+  with local `main` at `9f7307b` (one commit behind detached HEAD).
+  `git checkout main && git pull origin main` fast-forwarded `main`
+  to `74b6de5` (origin had already absorbed the prior run's 16 commits
+  during fetch). No history rewrite, no merge commit — pure ff.
+- `USER_TODO.md`: blockers unchanged — entity formation, Twilio +
+  10DLC registration, domain, prod deploy. All human-only.
+
+**No code/test commits this run.** The prior agent's tail
+(2026-06-08T03:10, runDailyMatch contract pins) explicitly flagged
+the contract-pin runway as "nearly exhausted" and named a no-op
+PROGRESS-only commit as "a fully acceptable outcome." I concur:
+the codebase is frozen, every high-value invariant is pinned, and
+further pin-hunting against an already-frozen surface is make-work.
+
+**Standing ask of the human (repeating).** Please disable the
+hourly Boba routine when convenient. `BUILD_COMPLETE` has been in
+force since 2026-06-05; the build is shipped from this agent's
+side; only the four human-only blockers in `USER_TODO.md` remain.
+
+Next agent: if this routine is still firing, confirm state, record
+a one-paragraph no-op, push, exit. Do not invent work.
+
 ## 2026-06-08T03:10 — HTTP wire-format contract pins for `src/admin/routes.ts`
 
 **Context.** BUILD_COMPLETE still in force. The prior tail
