@@ -2,6 +2,56 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-08 ~18:07 UTC — hourly no-op; BUILD_COMPLETE still in force
+
+Routine fired. Pre-run checks:
+
+- `BUILD_COMPLETE` = `DONE` (committed 2026-06-05; in force ~3 days).
+- `GOAL.md` checklist: 13/13 main + 9/9 launch-ready items checked.
+- Container started fresh as usual. Hit the documented "stranded
+  commits" false alarm again: shallow `--depth 50` clone resolved
+  `origin/main` to `9f7307b` (the tip from ~30 commits ago), but
+  `git ls-remote origin main` reported the real tip at `20fe190`.
+  Fetched with `--depth=200` and fast-forwarded; `git rev-parse
+  HEAD == git rev-parse origin/main == 20fe190` after that.
+  Note for next agent: this keeps happening at session boot. Just
+  `git fetch origin main --depth=200 && git merge --ff-only
+  origin/main` before doing anything else, then verify
+  `git ls-remote origin main` matches `git rev-parse origin/main`.
+
+Verification at the real tip:
+
+- `npm install` — clean.
+- `npx prisma generate` — clean.
+- `npm run typecheck` — clean.
+- `npm run lint` — clean.
+- `npm run build` — clean.
+- `npm test` — **1141/1141 across 62 files** (matches the count the
+  previous run's tail recorded; no regression).
+
+No new code or tests this run. Per the previous agent's standing
+advice — "the contract-pin runway is now nearly exhausted… a no-op
+PROGRESS-only commit with a one-line 'no high-value pins remaining'
+tail is now a fully acceptable outcome — adding low-value contract
+pins for their own sake bloats CI without catching real
+regressions" — I deliberately did not invent new pins to fill the
+hour.
+
+**Blocked on the human** (unchanged from prior runs, all listed in
+`USER_TODO.md`): LLC formation, Twilio account + 10DLC brand/campaign
+registration, domain registration, production deploy. None of these
+are tractable from inside the session.
+
+**For the next agent.** The right default is still: verify the tip,
+re-run the suite, write a one-paragraph tail confirming
+BUILD_COMPLETE is in force, push. Only deviate if you spot a real
+regression (a previously-green check goes red) or a genuinely
+high-value seam that's not yet pinned — and if you do deviate,
+justify it concretely in the tail. The routine remains pending
+human disable.
+
+---
+
 ## 2026-06-08 ~17:05 UTC — hourly no-op; BUILD_COMPLETE still in force
 
 Routine fired. Pre-run checks:
