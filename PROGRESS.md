@@ -5690,3 +5690,127 @@ is now 60 test files / 1078 tests; the priority work is
 genuinely thin on the ground. A no-op PROGRESS-only commit
 with a clear tail is a reasonable answer for future runs if
 no high-value surface remains.
+
+
+## 2026-06-08 04:09 UTC — `tests/scheduler/runDailyMatchContract.test.ts`
+
+**State on arrival.** BUILD_COMPLETE still in force, GOAL.md fully
+checked off, 1118/1118 tests across 61 files. HEAD detached at
+50191e7 (`origin/main` tip); local `main`/tracking ref were stale at
+9f7307b again. Re-pointed `main` at `origin/main` via
+`git fetch origin main && git checkout -B main origin/main`. Same
+stale-tracking-ref pattern the 19:08 UTC tail flagged — the
+fresh-clone guarantee genuinely does not hold; future agents should
+expect to re-sync.
+
+**Why this file.** Priority list from prior tail had `runDailyMatch`
+Prisma-shape pin as "lower priority". Re-evaluating: the existing
+`tests/scheduler/runDailyMatch.test.ts` is a strong behavioural
+suite but does NOT pin (a) the verbatim user-facing SMS COPY for the
+default notification, (b) the phone-lookup query projection, (c) the
+persist-before-notify ORDERING observable across both side-effect
+streams, (d) the result envelope key set, or (e) non-Error rejection
+coercion. Each of those is a real silent-regression seam. The
+admin/routes.ts contract pin (`50191e7`, prior run) closed the last
+clearly-high-value contract gap; this run closes the next one.
+
+**What this commit adds.** A single new file,
+`tests/scheduler/runDailyMatchContract.test.ts`, with 23 tests in 7
+contract groups:
+
+1. **`DEFAULT_NEW_MATCH_NOTIFICATION` verbatim COPY** — exact string
+   match (typos here ship to every matched user), boba emoji is the
+   raw unicode 🧋 (not `\u`-escape), em-dash U+2014 (not `- `),
+   keyword order `KEEP → MAYBE → DISCARD`, and a round-trip pin
+   confirming the runner uses this string as the default body.
+2. **Phone-lookup query shape** — `select: { id: true, phone: true }`
+   exactly (no extra projection fields, no `*`), `where: { id: { in:
+   […] } }` with both matched users, and `Set` deduplication so the
+   IN list never repeats an id.
+3. **Persist-before-notify ordering** — every `dailyMatch.create`
+   completes BEFORE any `twilio.sendSms`, verified by a single
+   monotonic sequence counter shared between the DB mock and the
+   Twilio mock (events recorded with `at: seq++`). Also pinned via
+   the all-sends-throw path: even when every notify rejects, the
+   create event lands earlier on the timeline. This is the
+   durability invariant — flipping the order would lose persisted
+   matches on a Twilio outage.
+4. **`DailyMatchRunResult` envelope** — `Object.keys(result)` is
+   EXACTLY `["candidates", "selected", "createdMatchIds",
+   "notified", "notifyErrors"]` in that source order, on BOTH the
+   populated and the empty path. A rename like `createdMatchIds →
+   created` is a silent ops break (admin endpoints + cron tick log
+   read these by name). `createdMatchIds` typed as `string[]`,
+   parallel-length with `selected`. `notified` is `string[]` of
+   phones (NOT user ids, NOT objects).
+5. **`notifyErrors` entry shape** — keys are EXACTLY `["phone",
+   "error"]`, both strings. Non-Error rejections coerced to
+   `String(value)`: a string-throw becomes itself, a numeric throw
+   becomes its decimal form ("42"). The runner promises a string in
+   the surface — pinning this prevents a future refactor from
+   leaking raw objects into ops dashboards.
+6. **Per-USER send count** — two users, one pair → exactly 2
+   `sendSms` calls (NOT 1, NOT 4); no duplicate recipients.
+7. **Custom body propagation** — `notificationBody: "X"` propagates
+   verbatim to every recipient (no template fill, no append, no
+   normalize). Critically: explicit empty string `""` is honoured
+   and NOT coerced back to the default. The source uses `??` which
+   only falls back on null/undefined; pinning this catches a future
+   "harmless" switch to `||` that would re-inject the default.
+8. **`today` default** — omitting `today` derives a Date at call
+   time and its UTC-day floor matches the floor of `Date.now()`
+   (accepting either side of a UTC-midnight straddle). Explicit
+   `today: 2027-03-14T23:59:59.999Z` floors to
+   `2027-03-14T00:00:00.000Z` in the persisted matchDate.
+
+**Mock design note.** The DB mock and the Twilio mock share a
+single `events` array and a monotonic `at: seq` counter. This is
+what makes the persist-before-notify invariant directly observable
+on a single number line (rather than inferred from "this test
+passed when twilio threw"). The pattern is reusable for any future
+contract that needs to pin call order across two independent
+side-effect sinks.
+
+**Verified.**
+- `npm install` — clean.
+- `npx prisma generate` — clean.
+- `npx vitest run tests/scheduler/runDailyMatchContract.test.ts` —
+  23/23.
+- `npm test` — **1141/1141** across 62 files (was 1118/61 before
+  this run, +23 from the new file).
+- `npm run typecheck` — clean.
+- `npm run lint` — clean. (Two unused `eslint-disable-next-line
+  @typescript-eslint/only-throw-error` directives flagged on first
+  pass; removed — the rule isn't configured here, so the disables
+  were unnecessary belt-and-braces for non-Error throws.)
+- `npm run build` — clean.
+
+**What I did NOT change.** Source code untouched. No new behaviour,
+no schema changes — every assertion is a black-box probe of the
+existing `runDailyMatch` surface.
+
+**For the next agent.** The contract-pin runway is now nearly
+exhausted. Remaining candidates I considered and explicitly chose
+NOT to pursue:
+
+1. `src/scheduler/runDailyMatch.ts` Prisma-shape pin — DONE this
+   run.
+2. `src/twilio/prisma-deps.ts` — `1a982cc` already covers
+   10DLC-opt-out / partner orientation / direction defaults; the
+   prior tail flagged this as saturated. Skip.
+3. Onboarding-flow Prisma-shape pin (`src/onboarding/flow.ts` writes
+   user/preferences/stats rows during graduation) — the COPY surface
+   is pinned in `tests/onboarding/flowContract.test.ts` already;
+   adding a row-shape pin would be deeper but the behavioural
+   coverage at `tests/onboarding/flow.test.ts` already asserts the
+   resulting DB state. Lower priority.
+4. End-of-day reveal MMS delivery (`src/twilio/reveal.ts`) — likely
+   already saturated by existing tests; verify before pinning.
+
+The next agent should genuinely re-evaluate before adding more
+test files. The behavioural suite + the contract pins added across
+the last ~10 runs together cover the surface that matters. A
+no-op PROGRESS-only commit with a one-line "no high-value pins
+remaining" tail is now a fully acceptable outcome — adding
+low-value contract pins for their own sake bloats CI without
+catching real regressions.
