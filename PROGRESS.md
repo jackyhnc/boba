@@ -2,6 +2,182 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-08T03:10 — HTTP wire-format contract pins for `src/admin/routes.ts`
+
+**Context.** BUILD_COMPLETE still in force. The prior tail
+(2026-06-07T18:11) had `src/admin/routes.ts` as the top
+remaining candidate: it noted that the route layer does its
+own projection / clamping / normalisation distinct from the
+already-pinned `prisma-deps.ts` adapter, and that the
+existing `tests/admin/routes.test.ts` only covers happy paths
+plus auth-gate status codes — not the wire shape itself.
+
+**What shipped.** `tests/admin/routesContract.test.ts`
+(40 tests, 7 describes) — locks down every piece of HTTP
+behaviour that lives in the route file and nowhere else.
+
+The eight critical surfaces it pins:
+
+1. **`/admin/run-daily-match` response projection.**
+   The route maps the underlying `DailyMatchRunResult` to a
+   distinct wire shape:
+     - `selected` (array) → `selectedCount` (number) — rename
+       AND count
+     - `notified` (array of phones) → `notified` (number) —
+       same key, but the type collapses array → number
+     - `candidates`, `createdMatchIds`, `notifyErrors` pass
+       through verbatim
+   The existing routes test only ever runs with empty
+   results, so the count-vs-array distinction is invisible.
+   The new test fakes a non-empty result and asserts
+   `body.selected === undefined` (raw array MUST NOT leak),
+   `typeof body.notified === "number"`, `body.notifyErrors`
+   is the array verbatim, plus an `Object.keys(body).sort()`
+   equality that catches any new field added in a refactor.
+
+2. **`/admin/invites/bulk` count clamping.**
+   `Math.max(1, Math.min(count ?? 1, 200))` covered with six
+   tests: `count: 0 → 1`, `count: -10 → 1`, `count: 100000 →
+   200`, boundary `200 → 200`, boundary `1 → 1`, missing
+   field → 1. The clamp is unique to the route — it could be
+   dropped without breaking any prisma-deps test.
+
+3. **`/admin/invites/bulk` label normalisation.**
+   `label?.trim() || null` covered with five tests:
+   whitespace-only → null, empty string → null, missing →
+   null, real label trimmed but preserved, internal
+   whitespace preserved.
+
+4. **`/admin/invites/bulk` 201 status code.**
+   Both the standard path and the clamp path return 201 (a
+   refactor that took a different branch for the clamp could
+   silently downgrade to 200).
+
+5. **`/admin/invites/bulk` envelope shape.**
+   `Object.keys(body).sort() === ["codes", "unredeemed"]` — no
+   extra fields. `codes[]` rows are `{ id, code }` only.
+   `unredeemed` is sourced via `inviteCode.count({ where:
+   { redeemedById: null } })` — the route invokes count
+   with the exact `where` clause, pinned in this file.
+
+6. **404 error body shapes — exact strings.**
+   Three routes can 404:
+     - `GET /admin/match/:id` → `{ error: "match not found" }`
+     - `POST /admin/users/:id/ban` → `{ error: "user not found" }`
+     - `POST /admin/users/:id/unban` → `{ error: "user not found" }`
+   The existing tests only assert `res.statusCode === 404`.
+   A refactor that switched to `reply.notFound(msg)` from
+   `@fastify/sensible` would still emit 404 but with a
+   different envelope (`{ statusCode, error, message }`),
+   silently breaking any external dashboard that parsed the
+   error string. Plus a distinctness test that pins
+   "match not found" !== "user not found" so the two paths
+   never collapse to the same generic body.
+
+7. **`/admin/users` querystring → adapter forwarding.**
+   The route layer parses `limit` via `parseInt(_, 10)`,
+   coerces missing `status` to `null` (which `listUsers`
+   then maps to "no where filter"), and forwards `cursor`
+   straight to the inclusive-skip cursor machinery. Six
+   tests cover: missing limit → adapter default (take=26),
+   numeric limit → take=limit+1, status filter,
+   missing-status → undefined where, cursor → `skip:1` +
+   `cursor:{id}`, missing-cursor → undefined.
+
+8. **Per-endpoint auth gate.**
+   The existing `routes.test.ts` only exercises 401 on
+   `/admin/users`. This file fans out the 401 check across
+   ALL six admin routes (`/admin/users`, `/admin/match/:id`,
+   `/admin/users/:id/ban`, `/admin/users/:id/unban`,
+   `/admin/run-daily-match`, `/admin/invites/bulk`) — a
+   copy-paste mistake that dropped `preHandler: auth` from
+   any new admin route would be caught immediately. The
+   `run-daily-match` 401 test also asserts `runDailyMatchCalls
+   === 0`, pinning that the auth gate short-circuits before
+   the handler runs (critical: if the order ever reversed,
+   an unauthenticated POST would still trigger a real
+   matching cycle and SMS blast). And the 401 / 503 error
+   envelopes themselves are pinned verbatim:
+   `{ error: "unauthorized" }` and `{ error: "admin disabled" }`.
+
+**Test-harness choice.** Built a minimal Fastify app
+directly rather than going through `buildApp`. Reasons:
+   - the projection test for `/admin/run-daily-match` needs
+     a hand-built `DailyMatchRunResult` (non-empty
+     `selected[]`, `notified[]`, `notifyErrors[]`); routing
+     this through the real `runDailyMatch` would require
+     plumbing a matching surface that happens to produce the
+     desired result from the inside out — fragile and a lot
+     of fake-DB code for one assertion
+   - the auth-gate-order assertion for
+     `/admin/run-daily-match` (`runDailyMatchCalls === 0`)
+     needs a counter on the decorated function, which is
+     cleanest with a hand-decorated app
+   - isolating the route layer from scheduler/twilio
+     plumbing makes the test file self-documenting — every
+     assertion is about HTTP behaviour, not about whether
+     the matching algorithm produced the right pair
+
+The pattern: `Fastify({ logger: false })` + `register(sensible)`
++ `app.decorate("runDailyMatch", ...)` + `registerAdminRoutes(...)`.
+
+**Verified.**
+- `npm install` — clean.
+- `npx prisma generate` — clean.
+- `npx vitest run tests/admin/routesContract.test.ts` —
+  40/40.
+- `npm test` — **1118/1118** across 61 files (was 1078/60
+  before this run, +40 from the new file).
+- `npm run typecheck` — clean.
+- `npm run lint` — clean.
+- `npm run build` — clean.
+
+**What I did NOT change.** Source code untouched. Black-box
+HTTP probes against the existing surface — no behaviour
+changes, no schema changes.
+
+**For the next agent.** Updated priority list. The named
+candidates from prior tails (depth, prisma-deps milestones,
+onboarding flow COPY, rematch surface, twilio conversation
+COPY, twilio prisma-deps, admin/auth, admin/routes,
+scheduler/runDailyMatch persist-side-effects) are largely
+saturated.
+
+What's left worth pinning:
+
+1. `src/scheduler/runDailyMatch.ts` — `ed3e94b` covers the
+   stranded-user case and persist-before-notify durability;
+   a Prisma-shape pin on the EXACT write side effects (which
+   rows it writes / updates / and in which order, the
+   `$transaction` boundary it uses for createMany +
+   matchedTodayPairs) may still be valuable. Medium
+   priority — would mostly catch a refactor that swapped
+   the persistence boundary inside out.
+
+2. `src/twilio/client.ts` MMS / multi-part body behaviour —
+   `f069bb5` covered sender selection / auth / errors;
+   the MMS `mediaUrl` / `body` precedence and the
+   length-splitting behaviour at the 1600-char boundary
+   (if any) are still uncovered. Read the file first; it
+   may not have splitting logic — in which case skip.
+
+3. `src/routes/health.ts` `/readyz` cache TTL and the
+   exact JSON envelope. The existing test (`health.test.ts`)
+   covers the happy path and DB-down 503; the cached-OK
+   shortcut (if any) and the exact `{ ok, db, uptime }`
+   key set may not be pinned.
+
+4. A no-op PROGRESS-only commit remains a reasonable
+   answer if no high-value surface remains. The project is
+   now 61 test files / 1118 tests; we are deep in
+   diminishing returns.
+
+Don't go mechanically — re-evaluate against the actual
+source files. Read the candidate first, check the existing
+test file for the same module, and only write a new
+`*Contract.test.ts` if there's a contract that EXISTS in
+the source but is NOT pinned anywhere.
+
 ## 2026-06-07T18:11 — contract pins for `src/invites/prisma-deps.ts` (redemption result shape, reason enum, $transaction wrap, query shapes, idempotency no-write, dual-surface collision detection, label propagation)
 
 **Context.** BUILD_COMPLETE remains in force. Most contract-pin candidates
