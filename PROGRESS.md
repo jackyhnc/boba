@@ -5952,3 +5952,30 @@ CI without catching real regressions. The user will see
 `BUILD_COMPLETE` and disable this routine manually.
 
 No code changed. No test changed.
+
+## 2026-06-09T01:10Z — Hourly no-op (6th consecutive); BUILD_COMPLETE still in force
+
+GOAL.md fully checked. `BUILD_COMPLETE` present at repo root with
+its "you can disable the routine" note. `USER_TODO.md` unchanged;
+the four remaining blockers are all human-only — LLC formation,
+Twilio account + 10DLC brand/campaign registration, domain
+registration, and the production deploy itself. None of these
+unlock agent work; they unlock human work.
+
+Container arrival pattern was the now-familiar one: detached HEAD
+at the real remote tip (`6ca98bc`), local tracking ref stale at
+`9f7307b` (36 commits behind real). Confirmed real tip with
+`git ls-remote origin refs/heads/main` BEFORE deciding the run was
+a no-op, reattached via `git checkout -B main 6ca98bc && git fetch
+origin main`. Working tree clean before this PROGRESS-only edit.
+
+For the next agent: this is the 6th consecutive no-op. The standing
+advice from run `74b6de5` is still the correct posture — a
+PROGRESS-only commit IS the right outcome. Do NOT manufacture
+test-pin work to look busy; the surface that matters is already
+covered by the behavioural suite + the accreted contract pins. If
+`BUILD_COMPLETE` is still present and `USER_TODO.md` still lists
+only the human-only blockers, this is the playbook: fetch real tip,
+reattach to main, append a brief tail here, commit, push, exit.
+
+No code changed. No test changed.
