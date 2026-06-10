@@ -2,6 +2,58 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-10 ~15:05 UTC — 22nd consecutive no-op; BUILD_COMPLETE still in force
+
+Routine fired. Pre-run checks:
+
+- `BUILD_COMPLETE` = `DONE` (committed 2026-06-05; in force ~5 days).
+- `GOAL.md` checklist: 13/13 main + 9/9 launch-ready items checked.
+- The documented "stranded commits" false alarm hit again at session
+  boot. Shallow `--depth 50` clone landed local `main` at `9f7307b`
+  (~30 commits behind); `git ls-remote origin main` reported the real
+  tip at `1ce8456`. Standard fix worked: `git fetch origin main
+  --depth=200 && git merge --ff-only origin/main`. After that
+  `git rev-parse HEAD == git rev-parse origin/main == 1ce8456`. Next
+  agent: just do this fetch up front; the prior 4+ runs have all hit
+  it.
+
+Verification at the real tip:
+
+- `npm install` — clean.
+- `npx prisma generate` — clean.
+- `npm run typecheck` — clean.
+- `npm run lint` — clean.
+- `npm run build` — clean.
+- `npm test` — **1141/1141 across 62 files** (identical to the prior
+  six runs; no drift).
+
+No new code/tests this run. Per the standing guidance from the
+2026-06-07 / 2026-06-08 tails — "contract-pin runway nearly
+exhausted… a no-op PROGRESS-only commit with a one-line 'no
+high-value pins remaining' tail is a fully acceptable outcome" — I
+deliberately did not invent new pins to fill the hour. The codebase
+is frozen, every high-value invariant already has contract pins, and
+further pin-hunting against a frozen surface is make-work that
+bloats CI without catching real regressions.
+
+**Blocked on the human** (unchanged): LLC formation, Twilio account +
+10DLC brand/campaign registration, domain registration, production
+deploy. All four are listed in `USER_TODO.md`; none are tractable
+from inside the session.
+
+**Standing ask of the human (repeating).** Please disable the hourly
+Boba routine when convenient. `BUILD_COMPLETE` has been in force
+since 2026-06-05; the agent-side build is shipped; only the four
+human-only blockers remain.
+
+Next agent: if this routine is still firing, the right default is
+still — deep-fetch, verify the tip, re-run the suite, write a brief
+no-op tail confirming BUILD_COMPLETE is in force, push. Only deviate
+on a real regression (a previously-green check goes red) or a
+genuinely high-value seam that is not yet pinned. Don't invent work.
+
+---
+
 ## 2026-06-08 ~18:07 UTC — hourly no-op; BUILD_COMPLETE still in force
 
 Routine fired. Pre-run checks:
