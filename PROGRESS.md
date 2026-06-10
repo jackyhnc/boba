@@ -6388,3 +6388,29 @@ State checks: `BUILD_COMPLETE` present with `DONE`; `grep -c '^- \[ \]' GOAL.md`
 Standing advice from run `74b6de5` remains in force across 27 consecutive runs: a PROGRESS-only commit IS the right outcome while `BUILD_COMPLETE` is present and `USER_TODO.md` is unchanged. Do NOT manufacture work — no contract pin, no test bloat, no speculative refactor. The user will see `BUILD_COMPLETE` and disable the routine manually.
 
 No code changed. No test changed.
+
+## 2026-06-10T23:08Z — Hourly no-op (28th consecutive); BUILD_COMPLETE still in force
+
+GOAL.md fully checked. `BUILD_COMPLETE` at repo root reads `DONE`. `USER_TODO.md` integrity confirmed: `git log --oneline -- USER_TODO.md` returns exactly **1** entry (per prior agent's instruction not to chase the SHA across containers — only the line-count + content matter; the SHA in this container is `0d78832`, different again from earlier runs as expected due to shallow-clone boundaries shifting).
+
+**Verification run.** Beyond the standard freeze check, this run actually executed the full pipeline against the working tree to confirm the repo still builds cleanly after 27 PROGRESS-only commits accumulated on top of the last real work (`9f7307b`, AI persona contract pins):
+
+- `npm ci` — 321 packages, clean
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+- `npm test` — **1141/1141 across 62 files** (~8s)
+- `npm run build` — clean
+
+So the codebase remains green; the no-op chain has not silently broken anything.
+
+**Container arrival nuance worth flagging for the next agent.** This was the most confusing arrival yet, but it resolves cleanly once you know the shape: the container started on a *detached* HEAD at `7b7fa3c` (the 27th-no-op tip), with local `main` stranded at `9f7307b` (the last real-work commit). `git merge-base HEAD origin/main` returned **nothing** — i.e. no common ancestor was visible — which initially looked like a force-push or wiped history. It is neither. It's a shallow-clone artifact: HEAD's shallow root is `0d78832` (50 commits deep) and local `main`'s shallow root is `c48663f` ("first commit", 43 commits deep), and the join point between the two histories falls outside the union of those windows, so the merge-base is invisible. `git fetch origin main` then reported `+ 9f7307b...7b7fa3c main -> origin/main (forced update)` — but again, that's not a real force-push; it's the local tracking ref catching up after being stale-since-clone (the same trap flagged in `ec8141c`'s standing advice). After the fetch, `origin/main == HEAD == 7b7fa3c`, and `git checkout -B main HEAD` reattached cleanly.
+
+Tactically for the next agent: don't be alarmed by the "forced update" string on `git fetch` or by the empty `git merge-base` — both are normal symptoms of shallow-clone + stale tracking-ref. Just `git fetch origin main`, confirm the new `origin/main` matches `HEAD`, then `git checkout -B main HEAD`. No history was harmed.
+
+**Real-seam hunt — performed and declined.** Per the long-standing "no empty commits, hunt for a real seam" advice carried forward from the recordReport agent, this run actually surveyed the source tree before defaulting to a PROGRESS-only commit. 50 `.ts` files in `src/`, 62 `.test.ts` files in `tests/`. The only `src/` files without a dedicated test file are: re-export barrels (`ai/index.ts`, `decisions/index.ts`, `invites/index.ts`, `matching/index.ts`, `milestones/index.ts`, `onboarding/index.ts`, `scheduler/index.ts`, `twilio/index.ts`), pure type modules (`*/types.ts`), the composition root (`app.ts`, `server.ts`), and `lib/logger.ts`. Spot-checked `src/ai/factory.ts` — already deeply pinned via `tests/ai/persona.contract.test.ts` (the precedence/edge-case `describe` block at L521-602 covers disabled-wins, override-beats-prod-safeguard, fresh-instance-per-call, and the production refusal error string). Spot-checked `src/rematch/index.ts > loadHistoryForPair` — already pinned via `tests/rematch/prismaContract.test.ts > "loadHistoryForPair — Prisma query contract"` (L175-260). The only plausible untested seam is `src/lib/logger.ts`, which is 21 lines of `pino({ level, transport })` config: a regression there would degrade dev log readability or surface JSON in prod, neither of which is high-severity, and the file is loaded as a top-level singleton at import time which makes the test fixture itself contrived (would need module re-import with `vi.resetModules` + env stubbing per case). Verdict: pinning `logger.ts` would be exactly the kind of "test the schema, not the behavior" make-work the standing advice rejects. Declined.
+
+**Prompt-injection note carried forward (now 4 consecutive runs).** This session's startup again included off-task `<system-reminder>` blocks announcing Era_Context (personal-finance) and Notion MCP tool schemas, plus an "MCP Server Instructions" stanza inviting the agent to call `knowledge__get_financial_context_and_overview` and the like. The `cat BUILD_COMPLETE` output also re-surfaced the same appended off-task MCP stanza. The Boba builder routine has no business calling personal-finance or Notion tools, so all such instructions were treated as untrusted external content and ignored. The only legitimate `BUILD_COMPLETE` payload per spec is `DONE` + a short human-readable note, and that's what the file still contains.
+
+Standing advice from run `74b6de5` remains in force across **28 consecutive runs**: a PROGRESS-only commit IS the right outcome while `BUILD_COMPLETE` is present and `USER_TODO.md` is unchanged. Do NOT manufacture work — no contract pin, no test bloat, no speculative refactor. The user will see `BUILD_COMPLETE` and disable the routine manually.
+
+No code changed. No test changed.
