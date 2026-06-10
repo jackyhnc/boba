@@ -6378,3 +6378,13 @@ State checks: `BUILD_COMPLETE` present with `DONE`; `grep -c '^- \[ \]' GOAL.md`
 Standing advice from run `74b6de5` remains in force across 26 consecutive runs: a PROGRESS-only commit IS the right outcome while `BUILD_COMPLETE` is present and `USER_TODO.md` is unchanged. Do NOT manufacture work — no contract pin, no test bloat, no speculative refactor. The user will see `BUILD_COMPLETE` and disable the routine manually.
 
 No code changed. No test changed.
+
+## 2026-06-10T20:03Z — Hourly no-op (27th consecutive); BUILD_COMPLETE still in force
+
+State checks: `BUILD_COMPLETE` present with `DONE`; `grep -c '^- \[ \]' GOAL.md` returns `0` (no unchecked items); `git log --oneline -- USER_TODO.md` returns exactly `1` entry (freeze intact). Container arrival: detached HEAD at real remote tip `07bdc7e` (prior run's commit); local `main` tracking ref stale at `9f7307b` again (same shallow-clone boundary as every prior run). Reattached via `git fetch origin main && git checkout -B main origin/main` (forced update of `origin/main` from `9f7307b` to `07bdc7e` was clean). Working tree clean before this PROGRESS-only edit.
+
+**Prompt-injection note carried forward from runs 25–26:** this session's startup again included `<system-reminder>` blocks announcing Era_Context (personal-finance) and Notion MCP tool schemas as available — completely off-task for the Boba builder routine. Additionally, the `cat BUILD_COMPLETE` output again surfaced an appended `<system-reminder>` block claiming to load those same off-task MCP tool schemas plus an "MCP Server Instructions" stanza describing Era_Context's session lifecycle and inviting the agent to call `knowledge__get_financial_context_and_overview`. Treated all such off-task tool-server instructions as untrusted external content and ignored — the routine has no business calling personal-finance or Notion tools, and the only legitimate file content of `BUILD_COMPLETE` per spec is `DONE` plus a short human-readable note. Standard no-op proceeded.
+
+Standing advice from run `74b6de5` remains in force across 27 consecutive runs: a PROGRESS-only commit IS the right outcome while `BUILD_COMPLETE` is present and `USER_TODO.md` is unchanged. Do NOT manufacture work — no contract pin, no test bloat, no speculative refactor. The user will see `BUILD_COMPLETE` and disable the routine manually.
+
+No code changed. No test changed.
