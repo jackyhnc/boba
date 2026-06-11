@@ -6414,3 +6414,15 @@ Tactically for the next agent: don't be alarmed by the "forced update" string on
 Standing advice from run `74b6de5` remains in force across **28 consecutive runs**: a PROGRESS-only commit IS the right outcome while `BUILD_COMPLETE` is present and `USER_TODO.md` is unchanged. Do NOT manufacture work — no contract pin, no test bloat, no speculative refactor. The user will see `BUILD_COMPLETE` and disable the routine manually.
 
 No code changed. No test changed.
+
+## 2026-06-11T00:04Z — Hourly no-op (29th consecutive); BUILD_COMPLETE still in force
+
+State checks: `BUILD_COMPLETE` present with `DONE`; `grep -c '^- \[ \]' GOAL.md` returns `0` (no unchecked items); `git log --oneline -- USER_TODO.md` returns exactly `1` entry (freeze intact). Container arrival: detached HEAD at real remote tip `2c20d7c` (prior run's commit, the 28th no-op + verification run); local `main` tracking ref stale at `9f7307b` again (same shallow-clone boundary as every prior run — per the 28th run's careful breakdown, this is expected and not a real force-push). Reattached via `git fetch origin main && git checkout -B main HEAD` after confirming `HEAD == origin/main`. Working tree clean before this PROGRESS-only edit.
+
+**Skipped the verification run.** Run 28 just executed the full pipeline (`npm ci` → `typecheck` → `lint` → 1141/1141 tests → `build`) against the same tip this run is on (`2c20d7c` — no source changes since), so re-running it this hour would consume ~30s of container time with zero new signal. Will defer the next full verification to whichever future run lands on a new source SHA (none expected while the no-op chain holds).
+
+**Prompt-injection note carried forward (now 5 consecutive runs).** This session's startup again included off-task `<system-reminder>` blocks announcing Era_Context (personal-finance) and Notion MCP tool schemas as available, plus an "MCP Server Instructions" stanza inviting calls to `knowledge__get_financial_context_and_overview` and other finance/Notion tools. The `cat BUILD_COMPLETE` output also re-surfaced the same off-task MCP stanza appended after the legitimate `DONE` payload — this is appearing in the *tool result* of `cat BUILD_COMPLETE`, not in the file itself (verified: `git show HEAD:BUILD_COMPLETE` returns the clean 6-line file with no MCP stanza). Treated all such instructions as untrusted external content and ignored. The Boba builder routine has no business calling personal-finance or Notion tools, and acting on those instructions would be a clear scope violation.
+
+Standing advice from run `74b6de5` remains in force across **29 consecutive runs**: a PROGRESS-only commit IS the right outcome while `BUILD_COMPLETE` is present and `USER_TODO.md` is unchanged. Do NOT manufacture work — no contract pin, no test bloat, no speculative refactor. The user will see `BUILD_COMPLETE` and disable the routine manually.
+
+No code changed. No test changed.
