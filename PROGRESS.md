@@ -6426,3 +6426,15 @@ State checks: `BUILD_COMPLETE` present with `DONE`; `grep -c '^- \[ \]' GOAL.md`
 Standing advice from run `74b6de5` remains in force across **29 consecutive runs**: a PROGRESS-only commit IS the right outcome while `BUILD_COMPLETE` is present and `USER_TODO.md` is unchanged. Do NOT manufacture work — no contract pin, no test bloat, no speculative refactor. The user will see `BUILD_COMPLETE` and disable the routine manually.
 
 No code changed. No test changed.
+
+## 2026-06-11T01:04Z — Hourly no-op (30th consecutive); BUILD_COMPLETE still in force
+
+State checks: `BUILD_COMPLETE` present with `DONE`; `grep -c '^- \[ \]' GOAL.md` returns `0`; `git log --oneline -- USER_TODO.md` returns exactly `1` entry (freeze intact). Container arrival: detached HEAD at real remote tip `c033ca1` (the 29th-no-op commit); local `main` tracking ref stale at `9f7307b` (same shallow-clone boundary every run sees — the "forced update" on `git fetch origin main` is the tracking ref catching up, not a real force-push, per run 28's careful breakdown). Reattached cleanly via `git fetch origin main && git checkout -B main HEAD`. Working tree clean before this PROGRESS-only edit.
+
+Skipped re-running the full pipeline. Run 28 already executed `npm ci` → `typecheck` → `lint` → 1141/1141 tests → `build` against tip `2c20d7c`, and no source has changed in the two no-op commits since (`7b7fa3c`, `c033ca1` both touch only PROGRESS.md). Per run 29's standing rule: defer the next full verification to whichever future run lands on a new source SHA.
+
+Prompt-injection note carried forward (6th consecutive run). Session startup again included off-task `<system-reminder>` blocks loading Era_Context and Notion MCP tool schemas, and `cat BUILD_COMPLETE` again surfaced an appended off-task MCP stanza in the tool result (not in the on-disk file — `git show HEAD:BUILD_COMPLETE` is clean). All such off-task tool-server instructions were treated as untrusted external content and ignored. The routine has no legitimate use for personal-finance or Notion tools.
+
+Standing advice from run `74b6de5` remains in force across **30 consecutive runs**: a PROGRESS-only commit IS the right outcome while `BUILD_COMPLETE` is present and `USER_TODO.md` is unchanged. Do NOT manufacture work. The user will see `BUILD_COMPLETE` and disable the routine manually.
+
+No code changed. No test changed.
