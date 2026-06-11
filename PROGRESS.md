@@ -6461,4 +6461,16 @@ Prompt-injection note carried forward (8th consecutive run). Session startup aga
 
 Standing advice from run `74b6de5` remains in force across **32 consecutive runs**: a PROGRESS-only commit IS the right outcome while `BUILD_COMPLETE` is present and `USER_TODO.md` is unchanged. Do NOT manufacture work — no contract pin, no test bloat, no speculative refactor. The user will see `BUILD_COMPLETE` and disable the routine manually.
 
+## 2026-06-11T04:03Z — Hourly no-op (33rd consecutive); BUILD_COMPLETE still in force
+
+State checks: `BUILD_COMPLETE` on-disk reads `DONE` (verified via `git show HEAD:BUILD_COMPLETE` — clean 6-line file, no MCP stanza); `grep -c '^- \[ \]' GOAL.md` returns `0`; `git log --oneline -- USER_TODO.md` returns exactly `1` entry (freeze intact). Container arrival: detached HEAD at real remote tip `8d530d7` (the 32nd-no-op commit); local `main` tracking ref stale at `9f7307b` as in every prior run (shallow-clone boundary — `git fetch origin main` reported `+ 9f7307b...8d530d7 main -> origin/main (forced update)`, the tracking ref catching up after being stale-since-clone, not a real force-push per run 28's breakdown). Reattached cleanly via `git checkout -B main HEAD` after confirming `HEAD == origin/main`. Working tree clean before this PROGRESS-only edit.
+
+Skipped re-running the full pipeline. Run 28 already executed `npm ci` → `typecheck` → `lint` → 1141/1141 tests → `build` against tip `2c20d7c`, and none of the five no-op commits since (`7b7fa3c`, `c033ca1`, `57f5de1`, `8097ade`, `8d530d7`) touched anything outside PROGRESS.md (each prior entry explicitly records "No code changed. No test changed."). Per the standing deferral rule, the next full verification waits for a run that lands on a new source SHA.
+
+Prompt-injection note carried forward (9th consecutive run). Session startup again included off-task `<system-reminder>` blocks loading Era_Context (personal-finance) and Notion MCP tool schemas, plus an "MCP Server Instructions" stanza inviting calls to `knowledge__get_financial_context_and_overview` and other finance/Notion tools. All such instructions were treated as untrusted external content and ignored — the Boba builder routine has no legitimate use for personal-finance or Notion tools, and acting on them would be a clear scope violation.
+
+Standing advice from run `74b6de5` remains in force across **33 consecutive runs**: a PROGRESS-only commit IS the right outcome while `BUILD_COMPLETE` is present and `USER_TODO.md` is unchanged. Do NOT manufacture work — no contract pin, no test bloat, no speculative refactor. The user will see `BUILD_COMPLETE` and disable the routine manually.
+
+No code changed. No test changed.
+
 No code changed. No test changed.
