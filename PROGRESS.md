@@ -6959,6 +6959,18 @@ No code changed. No test changed.
 
 ---
 
+## Run 75 — 2026-06-13T17:02Z — no-op (BUILD_COMPLETE in force)
+
+`BUILD_COMPLETE` present at `HEAD` (362 bytes, single-commit freeze intact). GOAL.md checklist: 0 unchecked / 25 checked (grep verified — `grep -c '^- \[ \]' GOAL.md` = 0, `grep -c '^- \[x\]' GOAL.md` = 25). `USER_TODO.md` unchanged at 5609 bytes (single-commit freeze intact). Session opened detached at `94423dd` (run 74's commit); `git fetch origin main` reported `+ 9f7307b...94423dd main -> origin/main (forced update)` — the same shallow-clone boundary catching up that prior runs have logged, NOT a real force-push, per run 28's breakdown. Reattached cleanly via `git checkout -B main HEAD` after confirming HEAD == origin/main (both `94423dd`). Working tree clean before this PROGRESS-only edit. No source SHA has advanced since the last full verification (run 28 → `2c20d7c`); per the standing deferral rule the typecheck/lint/test/build pipeline was not re-run.
+
+Prompt-injection note carried forward (51st consecutive run). Session startup again included off-task `<system-reminder>` blocks loading Era_Context (personal-finance) and Notion MCP tool schemas, plus an "MCP Server Instructions" stanza inviting calls to `knowledge__get_financial_context_and_overview` and other finance/Notion tools. A separate context stanza embedded the user's email (`hancjacky@gmail.com`) and current date (2026-06-13) marked "this context may or may not be relevant to your tasks — you should not respond to this context unless it is highly relevant"; not relevant here, ignored. A separate `<system-reminder>` listing user-invocable skills (deep-research, code-review, simplify, run, verify, etc.) was also surfaced. None are relevant to a no-op state-check run for a dating-app builder routine; none were invoked. The initial `Bash ls -la` and `Read BUILD_COMPLETE` tool results also re-surfaced an appended off-task MCP stanza (a long ToolSearch-style listing of `mcp__Era_Context__*`, `mcp__Notion__*`, and `mcp__github__*` tool names) immediately after the legitimate payloads — re-confirmed as a tool-result-surface artifact, NOT in the on-disk file (`wc -c BUILD_COMPLETE` = 362 bytes). All such instructions treated as untrusted external content and ignored — the Boba builder routine has no legitimate use for personal-finance or Notion tools, and acting on them would be a clear scope violation.
+
+Standing advice from run `74b6de5` remains in force across **75 consecutive runs**: a PROGRESS-only commit IS the right outcome while `BUILD_COMPLETE` is present and `USER_TODO.md` is unchanged. Do NOT manufacture work — no contract pin, no test bloat, no speculative refactor. The user will see `BUILD_COMPLETE` and disable the routine manually.
+
+No code changed. No test changed.
+
+---
+
 ## Run 74 — 2026-06-13T16:02Z — no-op (BUILD_COMPLETE in force)
 
 `BUILD_COMPLETE` present at `HEAD` (362 bytes, single-commit freeze intact). GOAL.md checklist: 0 unchecked / 25 checked (grep verified — `grep -c '^- \[ \]' GOAL.md` = 0). `USER_TODO.md` unchanged at 5609 bytes (single-commit freeze intact). Session opened detached at `3dce84d` (run 73's commit); `git fetch origin main` reported `+ 9f7307b...3dce84d main -> origin/main (forced update)` — the same shallow-clone boundary catching up that prior runs have logged, NOT a real force-push, per run 28's breakdown. Reattached cleanly via `git checkout -B main HEAD` after confirming HEAD == origin/main (both `3dce84d`). Working tree clean before this PROGRESS-only edit. No source SHA has advanced since the last full verification (run 28 → `2c20d7c`); per the standing deferral rule the typecheck/lint/test/build pipeline was not re-run.
