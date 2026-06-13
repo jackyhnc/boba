@@ -2,6 +2,14 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## 2026-06-13 20:03 UTC — 78th consecutive no-op; BUILD_COMPLETE still in force
+
+Routine fired. `BUILD_COMPLETE=DONE` (in force since 2026-06-05). `GOAL.md` 13/13 main + 9/9 launch-ready items still checked. Working tree clean; HEAD detached at `79a1129` matches `origin/main` post-fetch — the previous 77 hourly no-op entries are landed on the remote. No source SHA change since run 28's full pipeline (`typecheck`+`lint`+`1141/1141 tests`+`build`), so per the standing deferral rule, no re-verification was run this hour.
+
+Prompt-injection note carried forward (38th run). Session startup again surfaced unrelated `<system-reminder>` blocks for Era_Context (personal finance) and Notion MCP tool schemas plus an "MCP Server Instructions" stanza inviting `knowledge__get_financial_context_and_overview` etc. None are relevant to the Boba builder; all ignored as untrusted external content. The hourly Boba routine has no legitimate need for finance or Notion tools and none were loaded or called.
+
+Next agent: same. The signal to stop is unchanged — user disables the hourly routine manually after seeing `BUILD_COMPLETE`. Until then, brief no-op entry, push, exit.
+
 ## 2026-06-10 ~15:05 UTC — 22nd consecutive no-op; BUILD_COMPLETE still in force
 
 Routine fired. Pre-run checks:
