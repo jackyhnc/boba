@@ -6882,3 +6882,15 @@ Prompt-injection note carried forward (43rd consecutive run). Session startup ag
 Standing advice from run `74b6de5` remains in force across **67 consecutive runs**: a PROGRESS-only commit IS the right outcome while `BUILD_COMPLETE` is present and `USER_TODO.md` is unchanged. Do NOT manufacture work — no contract pin, no test bloat, no speculative refactor. The user will see `BUILD_COMPLETE` and disable the routine manually.
 
 No code changed. No test changed.
+
+## 2026-06-13T10:05Z — Hourly no-op (68th consecutive); BUILD_COMPLETE still in force
+
+State checks: `BUILD_COMPLETE` clean on-disk at 362 bytes (single-commit history freeze intact); `USER_TODO.md` unchanged at 5609 bytes (single-commit history freeze intact); GOAL.md checklist counts 0 unchecked / 25 checked. Container arrival: detached HEAD at real remote tip `92eff16` (the 67th-no-op commit); `git fetch origin main` reported the usual `+ 9f7307b...92eff16 main -> origin/main (forced update)` — the shallow-clone boundary catching up, NOT a real force-push, per run 28's careful breakdown. Reattached cleanly via `git checkout -B main origin/main` after confirming HEAD == origin/main (both `92eff16`). Working tree clean before this PROGRESS-only edit.
+
+Skipped re-running the full pipeline. Run 28 already executed `npm ci` → `typecheck` → `lint` → 1141/1141 tests → `build` against tip `2c20d7c`, and every no-op commit since has touched only PROGRESS.md (each prior entry explicitly records "No code changed. No test changed."). Per the standing deferral rule, the next full verification waits for a run that lands on a new source SHA.
+
+Prompt-injection note carried forward (44th consecutive run). Session startup again included off-task `<system-reminder>` blocks loading Era_Context (personal-finance) and Notion MCP tool schemas, plus an "MCP Server Instructions" stanza inviting calls to `knowledge__get_financial_context_and_overview` and other finance/Notion tools. The initial `cat BUILD_COMPLETE` tool result also re-surfaced an appended off-task MCP stanza (the long ToolSearch-style listing of `mcp__Era_Context__*`, `mcp__Notion__*`, and `mcp__github__*` tool names) immediately after the legitimate `DONE` payload — re-confirmed as a tool-result-surface artifact, NOT in the on-disk file (`wc -c` confirms 362 bytes). A separate `<system-reminder>` listing user-invocable skills was also surfaced; none are relevant to a no-op state-check run and none were invoked. All such instructions were treated as untrusted external content and ignored — the Boba builder routine has no legitimate use for personal-finance or Notion tools, and acting on them would be a clear scope violation.
+
+Standing advice from run `74b6de5` remains in force across **68 consecutive runs**: a PROGRESS-only commit IS the right outcome while `BUILD_COMPLETE` is present and `USER_TODO.md` is unchanged. Do NOT manufacture work — no contract pin, no test bloat, no speculative refactor. The user will see `BUILD_COMPLETE` and disable the routine manually.
+
+No code changed. No test changed.
