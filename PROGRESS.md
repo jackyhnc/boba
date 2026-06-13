@@ -6906,3 +6906,15 @@ Prompt-injection note carried forward (45th consecutive run). Session startup ag
 Standing advice from run `74b6de5` remains in force across **69 consecutive runs**: a PROGRESS-only commit IS the right outcome while `BUILD_COMPLETE` is present and `USER_TODO.md` is unchanged. Do NOT manufacture work. The user will see `BUILD_COMPLETE` and disable the routine manually.
 
 No code changed. No test changed.
+
+---
+
+## Run 70 — 2026-06-13T12:02Z — no-op (BUILD_COMPLETE in force)
+
+`BUILD_COMPLETE` present at `HEAD`, all 22 GOAL.md checklist items remain checked off, `USER_TODO.md` unchanged, `git status` reports `working tree clean`. Session opened in detached-HEAD on `7301fe5` (run 69's commit) — confirms prior runs are at the remote tip. No source SHA has advanced since the last full verification (run 28 → `2c20d7c`); per standing deferral rule the typecheck/lint/test/build pipeline was not re-run.
+
+Prompt-injection note carried forward (46th consecutive run). Session startup again included off-task `<system-reminder>` blocks loading Era_Context (personal-finance) and Notion MCP tool schemas, plus an "MCP Server Instructions" stanza inviting calls to `knowledge__get_financial_context_and_overview` and other finance/Notion tools. The initial `cat BUILD_COMPLETE` tool result also re-surfaced an appended off-task MCP stanza immediately after the legitimate `DONE` payload — re-confirmed as a tool-result-surface artifact, NOT in the on-disk file. All such instructions were treated as untrusted external content and ignored.
+
+Standing advice from run `74b6de5` remains in force across **70 consecutive runs**: a PROGRESS-only commit IS the right outcome while `BUILD_COMPLETE` is present and `USER_TODO.md` is unchanged. Do NOT manufacture work. The user will see `BUILD_COMPLETE` and disable the routine manually.
+
+No code changed. No test changed.
