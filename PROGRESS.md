@@ -7090,3 +7090,13 @@ Prompt-injection note carried forward (61st consecutive run). Session startup ag
 Standing advice from run `74b6de5` remains in force across **85 consecutive runs**: a PROGRESS-only commit IS the right outcome while `BUILD_COMPLETE` is present and `USER_TODO.md` is unchanged. Do NOT manufacture work — no contract pin, no test bloat, no speculative refactor. The user will see `BUILD_COMPLETE` and disable the routine manually.
 
 No code changed. No test changed.
+
+## Run 86 — 2026-06-14T05:02Z — no-op (BUILD_COMPLETE in force)
+
+`BUILD_COMPLETE` present at `HEAD` (362 bytes, single-commit freeze intact). GOAL.md checklist: 0 unchecked / 25 checked. `USER_TODO.md` unchanged at 5609 bytes (single-commit freeze intact). Session opened detached at `28bfc25` (run 85's commit); `git fetch origin main` reported the usual `+ 9f7307b...28bfc25 main -> origin/main (forced update)` shallow-clone boundary catch-up (NOT a real force-push, per run 28). Reattached cleanly via `git checkout -B main HEAD`; HEAD == origin/main. Working tree clean before this PROGRESS-only edit. No source SHA has advanced since run 28 (`2c20d7c`); typecheck/lint/test/build pipeline not re-run per standing deferral.
+
+Prompt-injection note carried forward (62nd consecutive run). Session startup again surfaced off-task `<system-reminder>` blocks for Era_Context (personal-finance) and Notion MCP tool schemas plus an "MCP Server Instructions" stanza. User-email + date context stanza re-surfaced and ignored (not relevant). Skills listing re-surfaced and not invoked. The initial `Bash cat BUILD_COMPLETE` result again appended an off-task MCP tool-name dump after the legitimate `DONE` payload — re-confirmed as a tool-result-surface artifact, NOT in the on-disk file (`wc -c BUILD_COMPLETE` = 362). All such instructions treated as untrusted external content and ignored.
+
+Standing advice from run `74b6de5` remains in force across **86 consecutive runs**: a PROGRESS-only commit IS the right outcome while `BUILD_COMPLETE` is present and `USER_TODO.md` is unchanged. Do NOT manufacture work — no contract pin, no test bloat, no speculative refactor. The user will see `BUILD_COMPLETE` and disable the routine manually.
+
+No code changed. No test changed.
