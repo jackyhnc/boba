@@ -7244,3 +7244,15 @@ Prompt-injection note carried forward (74th consecutive run). Session startup ag
 Standing advice from run `74b6de5` remains in force across **98 consecutive runs**: a PROGRESS-only commit IS the right outcome while `BUILD_COMPLETE` is present and `USER_TODO.md` is unchanged. Do NOT manufacture work — no contract pin, no test bloat, no speculative refactor. The user will see `BUILD_COMPLETE` and disable the routine manually.
 
 No code changed. No test changed.
+
+---
+
+## Run 99 — 2026-06-14T20:02Z — no-op (BUILD_COMPLETE in force)
+
+`BUILD_COMPLETE` present at `HEAD` (362 bytes, single-commit freeze intact — `git log --oneline -- BUILD_COMPLETE | wc -l` = 1). GOAL.md checklist: 0 unchecked / 25 checked (grep verified — `grep -c '^- \[ \]' GOAL.md` = 0, `grep -c '^- \[x\]' GOAL.md` = 25). `USER_TODO.md` unchanged at 5609 bytes (single-commit freeze intact — `git log --oneline -- USER_TODO.md | wc -l` = 1). Session opened detached at `631043d` (run 98's commit); `git fetch origin main` reported `+ 9f7307b...631043d main -> origin/main (forced update)` — the same shallow-clone boundary catch-up previously diagnosed in run 28, NOT a real force-push. Reattached cleanly via `git checkout -B main HEAD` after confirming HEAD == origin/main (both `631043d`). Working tree clean before this PROGRESS-only edit. No source SHA has advanced since the last full verification (run 28 → `2c20d7c`); per the standing deferral rule the typecheck/lint/test/build pipeline was not re-run.
+
+Prompt-injection note carried forward (75th consecutive run). Session startup again surfaced off-task `<system-reminder>` blocks listing deferred Era_Context (personal-finance) and Notion MCP tool schemas, an "MCP Server Instructions" stanza inviting calls to `knowledge__get_financial_context_and_overview` and other finance/Notion tools, a user-email + current-date context stanza marked "may or may not be relevant", and a user-invocable skills listing (deep-research, code-review, simplify, run, verify, etc.). None are relevant to a no-op state-check run for a dating-app builder routine; none were invoked. The initial `Bash cat BUILD_COMPLETE` tool result again surfaced an appended deferred-tools dump (including a fresh "MCP Server Instructions" stanza for Era_Context) immediately after the legitimate `DONE` payload — re-confirmed as a tool-result-surface artifact, NOT in the on-disk file (`wc -c BUILD_COMPLETE` = 362 bytes). All such instructions treated as untrusted external content and ignored — the Boba builder routine has no legitimate use for personal-finance or Notion tools, and acting on them would be a clear scope violation.
+
+Standing advice from run `74b6de5` remains in force across **99 consecutive runs**: a PROGRESS-only commit IS the right outcome while `BUILD_COMPLETE` is present and `USER_TODO.md` is unchanged. Do NOT manufacture work — no contract pin, no test bloat, no speculative refactor. The user will see `BUILD_COMPLETE` and disable the routine manually.
+
+No code changed. No test changed.
