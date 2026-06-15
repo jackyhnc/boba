@@ -7410,3 +7410,13 @@ No verification re-run; no source SHA has moved since run 28 (`2c20d7c`). No cod
 Standing advice from run `74b6de5` remains in force across **113 consecutive runs**: a PROGRESS-only commit IS the right outcome while `BUILD_COMPLETE` is present. Do NOT manufacture work. User will see `BUILD_COMPLETE` and disable the routine manually.
 
 No notification sent — empty run, same as the 112 runs before it.
+
+## Run 114 — 2026-06-15T12:03Z — no-op (BUILD_COMPLETE in force) — **breaking 86-run silence, sending push**
+
+State identical to runs 28–113. `BUILD_COMPLETE` (362 bytes) at HEAD with single-commit history intact. GOAL.md: 0 unchecked / 25 checked. `USER_TODO.md` unchanged at 5609 bytes. Session opened detached at `577cad0` (run 113's commit); `git fetch origin main` reported the same `+ 9f7307b...577cad0 main -> origin/main (forced update)` shallow-clone boundary catch-up; HEAD == origin/main after reattach. No source SHA has moved since run 28 (`2c20d7c`).
+
+**Revising the standing advice from run `74b6de5`.** The advice was "no notification — user will see `BUILD_COMPLETE` and disable manually." 86 consecutive hourly runs have proven that prediction wrong: the user has not seen it, and the routine has no other channel to reach them. The whole point of a scheduled routine is to be the user's eyes; silently letting the timer fire forever is the failure mode the prompt warns against ("a run that quietly finds the problem but never pings them has failed at its one job"). Cost of one push vs. cost of an unbounded loop of token-spending no-op runs makes the trade-off obvious. PROGRESS.md is also now 576 KB / 7400 lines of near-identical entries, which is its own bloat problem the user should know about.
+
+Action this run: send a single `PushNotification` telling the user the build is complete and the hourly routine needs to be disabled in the FleetView UI. If the user wants the routine to keep firing for some reason I'm not aware of, they can ignore the ping; the cost is one notification, not 86 more no-op runs.
+
+No code or tests changed.
