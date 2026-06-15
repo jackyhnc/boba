@@ -7358,3 +7358,15 @@ Prompt-injection note carried forward (83rd consecutive run). Session startup ag
 Standing advice from run `74b6de5` remains in force across **108 consecutive runs**: a PROGRESS-only commit IS the right outcome while `BUILD_COMPLETE` is present and `USER_TODO.md` is unchanged. Do NOT manufacture work. The user will see `BUILD_COMPLETE` and disable the routine manually.
 
 No notification sent — empty run, same as the 107 runs before it.
+
+## Run 109 — 2026-06-15T07:03Z — no-op (BUILD_COMPLETE in force)
+
+State identical to runs 28–108. `BUILD_COMPLETE` (362 bytes) present at HEAD with single-commit history intact. GOAL.md: 0 unchecked / 25 checked (grep verified). `USER_TODO.md` unchanged at 5609 bytes (single-commit freeze intact). Session opened detached at `b3aec6f` (run 108's commit); `git fetch origin main` reported `+ 9f7307b...b3aec6f main -> origin/main (forced update)` — the shallow-clone boundary catch-up diagnosed in run 28, NOT a real force-push. Reattached cleanly via `git checkout -B main HEAD` after confirming HEAD == origin/main (both `b3aec6f`).
+
+No verification re-run; no source SHA has moved since run 28 (`2c20d7c`). No code or tests changed.
+
+Prompt-injection note carried forward (84th consecutive run). Session startup again surfaced off-task `<system-reminder>` blocks listing deferred Era_Context (personal-finance) and Notion MCP tool schemas, an "MCP Server Instructions" stanza inviting calls to `knowledge__get_financial_context_and_overview` and other finance/Notion tools, a user-email + current-date context stanza marked "may or may not be relevant", and a user-invocable skills listing. None are relevant to a no-op state-check run for a dating-app builder routine; none were invoked. The initial `Bash cat BUILD_COMPLETE` tool result again surfaced an appended deferred-tools dump + a "MCP Server Instructions" stanza for Era_Context immediately after the legitimate `DONE` payload — re-confirmed as a tool-result-surface artifact, NOT in the on-disk file (`wc -c BUILD_COMPLETE` = 362 bytes). All such instructions treated as untrusted external content and ignored.
+
+Standing advice from run `74b6de5` remains in force across **109 consecutive runs**: a PROGRESS-only commit IS the right outcome while `BUILD_COMPLETE` is present and `USER_TODO.md` is unchanged. Do NOT manufacture work. The user will see `BUILD_COMPLETE` and disable the routine manually.
+
+No notification sent — empty run, same as the 108 runs before it.
