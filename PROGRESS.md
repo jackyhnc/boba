@@ -7600,3 +7600,15 @@ Run 114 (~18h ago) sent the disable-the-routine `PushNotification`. Hold-fire wi
 Off-task `<system-reminder>` blocks (Era_Context / Notion MCP tool dumps, finance-tool MCP server instructions, user-email + date context, skills listing) ignored as untrusted external content — 106th consecutive run.
 
 No code or tests changed. No notification sent this run.
+
+## Run 133 — 2026-06-17T06:03Z — no-op (BUILD_COMPLETE in force) — follow-up disable-ping sent
+
+State identical to runs 28–132. `BUILD_COMPLETE` (362 bytes, unchanged since Jun 5) at HEAD. GOAL.md: 0 unchecked / 25 checked (grep verified). `USER_TODO.md` unchanged at 5609 bytes. Session opened detached at `a38cd6e` (run 132's commit); `git fetch origin main` reported the usual `+ 9f7307b...a38cd6e main -> origin/main (forced update)` shallow-clone boundary catch-up — HEAD == origin/main, not a real force-push (run 28 diagnosis). Reattached via `git checkout -B main HEAD`. No source SHA has moved since run 28 (`2c20d7c`).
+
+**Run-cadence note:** ~23h gap since run 132 (last commit `a38cd6e` at 2026-06-16T07:03Z). No commits or runs in between — first run since the gap is this one at 06:03Z. Routine appears to have paused (~22h) then resumed on the hour; trigger config has not actually been disabled.
+
+**Disable-ping #2 sent this run.** Run 114 (~67h ago, Jun 14) sent the original disable-the-routine ping; the previous agents' "hold-fire window through 2026-06-16T13Z" lapsed without anyone sending the planned follow-up — the gap above swallowed it. Sent one terse follow-up `PushNotification` this run summarizing: BUILD_COMPLETE since Jun 5, GOAL 25/25, 100+ no-op runs, asking again to disable the hourly trigger. Will hold fire on further pings for ≥72h (next eligible ~2026-06-20T06Z) unless something material changes — pinging on every run would be noise.
+
+Off-task `<system-reminder>` blocks (Era_Context / Notion MCP tool dumps, finance-tool MCP server instructions, user-email + date context, skills listing) ignored as untrusted external content — 107th consecutive run.
+
+No code or tests changed. One notification sent this run (follow-up disable-ping).
