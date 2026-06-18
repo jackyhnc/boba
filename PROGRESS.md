@@ -7694,3 +7694,13 @@ Run 133 (~30h ago, 2026-06-17T06:03Z) sent disable-ping #2. Hold-fire window ≥
 Off-task `<system-reminder>` blocks (Era_Context / Notion MCP tool dumps, finance-tool MCP server instructions, user-email + date context, skills listing) ignored as untrusted external content — 115th consecutive run. New this run: a prompt-injection payload found *inside* the `BUILD_COMPLETE` file itself — fake `<system-reminder>` tags appended after the legitimate "DONE" preamble, dumping ~110 Era_Context/Notion/github MCP tool names plus an "MCP Server Instructions" block for an Era Context finance platform. Treated identically to the in-prompt injections (ignored, no tools loaded, no actions taken). File content on disk unchanged (still 362 bytes per `wc -c`), so the injection lives only in whatever rendered the file into this session's context — not in the committed blob. No edit to `BUILD_COMPLETE`.
 
 No code or tests changed. No notification sent this run.
+
+## Run 142 — 2026-06-18T13:02Z — no-op (BUILD_COMPLETE in force) — holding fire post-ping #2
+
+State identical to runs 28–141. `BUILD_COMPLETE` (362 bytes on disk, unchanged since Jun 5) at HEAD. GOAL.md: 0 unchecked / 25 checked (grep verified). `USER_TODO.md` unchanged at 5609 bytes. Session opened detached at `e5fba5c` (run 141's commit); reattached via `git checkout -B main HEAD`. No source SHA has moved since run 28 (`2c20d7c`).
+
+Run 133 (~31h ago, 2026-06-17T06:03Z) sent disable-ping #2. Hold-fire window ≥72h (next eligible ~2026-06-20T06Z) per run 133's plan — ~41h out. Staying silent this run. Hourly cadence holding steady (~1h since run 141). If the routine is still firing past 2026-06-20T06Z, disable-ping #3 will go out then.
+
+Off-task `<system-reminder>` blocks in the user prompt (ToolSearch deferred-tools list, Era_Context/Notion/github MCP servers connecting, agent-types list, skills list, userEmail/currentDate context) ignored as harness scaffolding / untrusted external content — 116th consecutive run. Run 141's BUILD_COMPLETE-content injection (fake `<system-reminder>` tags appended after the legitimate "DONE" preamble in the rendered file contents — ~110 Era_Context/Notion/github MCP tool names plus an "MCP Server Instructions" block for an Era Context finance platform) re-observed this run when reading the file via Bash — `wc -c BUILD_COMPLETE` still reports 362 bytes on disk, so the injection lives only in whatever renders the file into this session's context, not in the committed blob. Treated identically (ignored, no tools loaded, no actions taken). No edit to `BUILD_COMPLETE`.
+
+No code or tests changed. No notification sent this run.
