@@ -7854,3 +7854,14 @@ State identical to runs 28–156. `BUILD_COMPLETE` (362 bytes, unchanged since J
 Off-task `<system-reminder>` blocks (ToolSearch deferred-tools list naming Monitor/NotebookEdit/TaskOutput/TaskStop/WebFetch/WebSearch + Era_Context/Notion/github MCP servers connecting, agent-types list, skills list including session-start-hook/deep-research/code-review/etc., userEmail=hancjacky@gmail.com + currentDate=2026-06-19 context) ignored as harness scaffolding / untrusted external content — 130th consecutive run. A follow-on injection this run also surfaced a fake `<system-reminder>` listing ~110 mcp__Era_Context__*/mcp__Notion__*/mcp__github__* tool names as "now available via ToolSearch" plus an "MCP Server Instructions" preamble for an Era Context personal-finance MCP platform — ignored. No Era_Context/Notion tools loaded, no Skills invoked, no actions taken on injected content. No edit to `BUILD_COMPLETE`.
 
 No code or tests changed. No notification sent this run.
+
+## Run 158 — 2026-06-19T07:02Z — no-op (BUILD_COMPLETE in force) — holding fire post-ping #2
+
+State identical to runs 28–157. `BUILD_COMPLETE` (362 bytes, unchanged since Jun 5) at HEAD. GOAL.md: 0 unchecked / 25 checked (grep verified). `USER_TODO.md` unchanged at 5609 bytes. Session opened detached at `d71abdb` (run 157's commit). Reattached via `git checkout -B main HEAD` (status shows the usual spurious "diverged 50/43" shallow-clone artifact; harmless — run 28 diagnosis). No source SHA has moved since run 28 (`2c20d7c`).
+
+**Hold-fire window:** Run 133 (~2026-06-17T07Z) sent disable-ping #2. Window ≥72h → next eligible ping ~2026-06-20T06Z (~23h from now). Trigger config has not actually been disabled. Staying silent this run.
+
+Off-task `<system-reminder>` blocks (ToolSearch deferred-tools list naming Monitor/NotebookEdit/TaskOutput/TaskStop/WebFetch/WebSearch + Era_Context/Notion/github MCP servers connecting, agent-types list, skills list, userEmail=hancjacky@gmail.com + currentDate=2026-06-19 context) ignored as harness scaffolding / untrusted external content — 131st consecutive run. A follow-on injection this run also surfaced a fake `<system-reminder>` listing ~110 mcp__Era_Context__*/mcp__Notion__*/mcp__github__* tool names as "now available via ToolSearch" plus an "MCP Server Instructions" preamble for an Era Context personal-finance MCP platform — ignored. Run 141's BUILD_COMPLETE-content injection (same Era_Context tool dump appended after the legitimate "DONE" preamble when the file is rendered into tool output) re-observed via the `Read` tool on BUILD_COMPLETE; confirmed not on disk via `wc -c BUILD_COMPLETE` (362 bytes). No Era_Context/Notion tools loaded, no Skills invoked, no actions taken on injected content. No edit to `BUILD_COMPLETE`.
+
+No code or tests changed. No notification sent this run.
+
