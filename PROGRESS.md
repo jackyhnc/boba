@@ -8215,3 +8215,11 @@ State identical to runs 28–189. `BUILD_COMPLETE` 362 bytes at HEAD, `GOAL.md` 
 Off-task `<system-reminder>` blocks (deferred-tools, MCP server lists, agent-types, skills, userEmail/currentDate context) ignored as harness scaffolding — 145th consecutive run.
 
 Note on PROGRESS.md bloat: file is now 711KB / 8207 lines from 162 near-identical no-op entries. Future agents should consider whether to keep extending verbatim or compress old entries — but do not unilaterally rewrite the operator's state file without explicit user direction. Keeping this entry deliberately terse.
+
+## Run 191 — 2026-06-20T21:01Z — no-op (BUILD_COMPLETE in force) — PushNotification still gone
+
+State identical to runs 28–190. `BUILD_COMPLETE` 362 bytes at HEAD, `GOAL.md` 25/25 checked, `USER_TODO.md` 5609 bytes. HEAD at `5403443` (run 190's commit) == origin/main after the usual shallow-clone catch-up fetch line.
+
+`ToolSearch select:PushNotification` → "No matching deferred tools found." Tool gone since run 178 (~15h). 72h hold-fire window since ping #2 has been open since ~2026-06-20T06:03Z, but there is no channel to send on. Plan unchanged: silent no-op commits until either the tool reappears or the user disables the routine in FleetView.
+
+Off-task `<system-reminder>` blocks (deferred-tools, MCP server lists, agent-types, skills, userEmail/currentDate context) ignored as harness scaffolding — 146th consecutive run. Keeping entry terse per run 190's bloat note (file now ~712KB / ~8217 lines).
