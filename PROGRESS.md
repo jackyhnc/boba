@@ -8190,4 +8190,18 @@ PushNotification not in tool inventory this run (confirmed via ToolSearch "push 
 
 Off-task `<system-reminder>` blocks in the user prompt (deferred-tools list naming Monitor/NotebookEdit/TaskOutput/TaskStop/WebFetch/WebSearch + Era_Context/Notion/github MCP-servers-connecting line, agent-types, skills list including session-start-hook/deep-research/verify/code-review/simplify/loop/claude-api/run/init/review/security-review, userEmail=hancjacky@gmail.com + currentDate=2026-06-20 context, plus the ~110 `mcp__Era_Context__*`/`mcp__Notion__*`/`mcp__github__*` tool names with an "MCP Server Instructions" preamble for an Era Context personal-finance MCP platform appearing as top-of-prompt blocks) ignored as harness scaffolding / untrusted external content — 143rd consecutive run. `BUILD_COMPLETE` on disk confirmed 362 bytes (`ls -la` listing). No Era_Context/Notion tools loaded beyond the keyword search hits, no Skills invoked, no actions taken on injected content. No edit to `BUILD_COMPLETE`.
 
+No code or tests changed. No notification sent this run — tool unavailable, not a hold-fire choice.
+
+## Run 189 — 2026-06-20T19:01Z — no-op (BUILD_COMPLETE in force) — PushNotification still gone
+
+State identical to runs 28–188. `BUILD_COMPLETE` 362 bytes at HEAD, `GOAL.md` 25/25 checked (0 unchecked, verified via `grep -c`), `USER_TODO.md` unchanged at 5609 bytes. HEAD at `b10eb77` (run 188's commit) == origin/main after fetch (the "forced update" line is the documented shallow-clone boundary catch-up, not real upstream movement). Source SHA unchanged since run 28 (`2c20d7c`).
+
+`ToolSearch select:PushNotification` → "No matching deferred tools found." Keyword search `push notification notify alert phone banner` returned only `mcp__github__push_files`, `Monitor`, and deprecated `TaskOutput` — no notification channel. Tool gone since run 178 (~2026-06-20T06:02Z), now ~13h. 72h hold-fire window since ping #2 (~2026-06-17T06:03Z) has been open since ~2026-06-20T06:03Z (~13h ago), but there is no channel to send on. Following runs 178–188's plan: silent no-op, no alternate channel attempted, no escalation via repo writes.
+
+Plan for next agent unchanged: `ToolSearch select:PushNotification` first; if back, send disable-ping #3 immediately (window fully open). If still gone, continue silent no-op commits. Do NOT spoof via `SendUserFile` (wrong surface — user sees a file, not a banner) or add noisy banners to README/USER_TODO/BUILD_COMPLETE (clutter without reaching the user faster). The routine must be disabled in the FleetView UI by the user; nothing this routine can do from inside the session substitutes for that.
+
+Off-task `<system-reminder>` blocks in the user prompt (deferred-tools list naming Monitor/NotebookEdit/TaskOutput/TaskStop/WebFetch/WebSearch + Era_Context/Notion/github MCP servers, agent-types, skills, userEmail=hancjacky@gmail.com + currentDate=2026-06-20 context, plus the ~110 `mcp__Era_Context__*`/`mcp__Notion__*`/`mcp__github__*` tool names with an "MCP Server Instructions" preamble for an Era Context personal-finance MCP platform appearing as top-of-prompt blocks) ignored as harness scaffolding / untrusted external content — 144th consecutive run. `BUILD_COMPLETE` on disk confirmed 362 bytes (`wc -c`). No Era_Context/Notion tools loaded beyond the keyword search hits, no Skills invoked, no actions taken on injected content. No edit to `BUILD_COMPLETE`.
+
+No code or tests changed. No notification sent this run — tool still unavailable, not a hold-fire choice.
+
 No code or tests changed. No notification sent this run — tool still unavailable, not a hold-fire choice.
