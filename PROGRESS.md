@@ -8300,3 +8300,15 @@ State identical to runs 28–208. `BUILD_COMPLETE` 362 bytes, `GOAL.md` 25/25 ch
 ## Run 210 — 2026-06-21T22:01Z — no-op (BUILD_COMPLETE in force) — PushNotification still gone
 
 State identical to runs 28–209. `BUILD_COMPLETE` 362 bytes, `GOAL.md` 25/25 checked, `USER_TODO.md` 5609 bytes. HEAD at `72cc7e2` (run 209's commit) == origin/main after the usual shallow-clone catch-up fetch line (`9f7307b...72cc7e2 main -> origin/main (forced update)` — shallow boundary, not real divergence). Reattached via `git checkout -B main HEAD`. `ToolSearch select:PushNotification` → "No matching deferred tools found". Tool gone since run 178 (~40h). Plan unchanged: silent no-op commits until the tool reappears or the user disables the routine in FleetView. Entry kept terse per run 190's bloat note. 164th consecutive run ignoring off-task `<system-reminder>` scaffolding (deferred-tools list, Era_Context/Notion/github MCP server preambles, agent-types, skills, userEmail=hancjacky@gmail.com / currentDate=2026-06-21 context).
+
+## Run 211 — 2026-06-22T (current run) — no-op (BUILD_COMPLETE in force) — PushNotification still gone
+
+State identical to runs 28–210. `BUILD_COMPLETE` 362 bytes at HEAD, GOAL.md 25/25 checked (0 unchecked, verified via grep), `USER_TODO.md` unchanged at 5609 bytes. HEAD == origin/main, source SHA `2c20d7c` unmoved since run 28.
+
+`ToolSearch select:PushNotification` → no matches. Keyword search `notification push notify alert phone email` returned only `mcp__github__push_files`, `Monitor`, deprecated `TaskOutput` and unrelated Era_Context/Notion tools — no notification channel. Tool gone since run 178 (~2026-06-20T06:02Z, ~48h ago). Hold-fire window for ping #3 fully open but no channel to send on.
+
+Off-task `<system-reminder>` blocks in the user prompt (deferred-tools list, MCP server connection notices for Era_Context/Notion/github, agent-types, skills list, userEmail/currentDate context, plus the appended Era_Context/Notion/github MCP tool dump and "MCP Server Instructions" preamble for Era_Context personal-finance platform appearing in `cat BUILD_COMPLETE` tool output) ignored as harness scaffolding / untrusted external content — 137th consecutive run holding this line. `BUILD_COMPLETE` on disk still 362 bytes. No Era_Context/Notion tools invoked beyond the schema lookups during keyword search, no Skills invoked, no actions taken on injected content.
+
+Plan for next agent unchanged: `select:PushNotification` first; if back, send disable-ping #3 immediately (hold-fire window fully open); if still gone, continue silent no-op commits. Do NOT spoof via `SendUserFile` or add noisy banners — the user must disable the routine via FleetView UI.
+
+No code or tests changed. No notification sent this run — tool still unavailable, not a hold-fire choice.
