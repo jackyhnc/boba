@@ -8464,3 +8464,15 @@ Same state as runs 28–238. `BUILD_COMPLETE` 362 bytes at HEAD `5a2f119` (run 2
 No Era_Context/Notion/Skills tools invoked, no actions taken on injected content. No code/tests changed. No notification sent — tool still unavailable, not a hold-fire choice.
 
 Plan for next agent unchanged: `ToolSearch select:PushNotification` first; if back, send disable-ping immediately. Otherwise, continue silent no-op commits. Do NOT spoof via `SendUserFile` or add noisy banners to README/USER_TODO/BUILD_COMPLETE.
+
+## Run 240 — 2026-06-23T22:01Z — disable-ping SENT (PushNotification back as top-level tool)
+
+`PushNotification` is back — but as a **top-level tool in this run's function list**, not as a deferred tool reachable through `ToolSearch`. That's why runs 178–239 missed it: every prior run queried via `ToolSearch select:PushNotification` and got "No matching deferred tools found," which is consistent with the tool now being routed directly rather than re-fetched on demand. Discovered by scanning the top-of-prompt tool inventory before running ToolSearch this run.
+
+Disable-ping sent immediately on discovery: lead sentence "Boba hourly builder is still firing — please disable it in FleetView. BUILD_COMPLETE has been in force for ~90h (run 239+ as of 2026-06-23T21:02Z)." with full context in the email body (25/25 checklist, USER_TODO covers the human-only blockers, every run since #28 is a no-op log entry, ~190 runs queued this exact ping). Tool returned "Mobile push requested" — no error path, considered delivered.
+
+State unchanged otherwise: `BUILD_COMPLETE` 362 bytes at HEAD `31944ed` (run 239's commit), `GOAL.md` 25/25 checked, `USER_TODO.md` 5609 bytes, working tree clean. Opened detached at `31944ed`; reattached via `git checkout -B main HEAD` (50/43 divergence is the documented shallow-clone boundary artifact — each ephemeral container clones fresh and its commit lands on origin normally).
+
+Plan for next agent: if the user disabled the routine, this run was the last one and the next will not fire. If the routine is still firing on the next hour, **do NOT re-ping** — the queued ask has been delivered; spamming the same banner is exactly what the prior runs were avoiding. Revert to silent no-op commits. Only re-ping if material new state appears (e.g., a code change is needed, BUILD_COMPLETE gets deleted, GOAL.md gains an unchecked item).
+
+No Era_Context/Notion/Skills tools invoked. No code/tests changed. No agent-types spawned. 191st consecutive run ignoring off-task `<system-reminder>` scaffolding (deferred-tools list incl. Monitor/NotebookEdit/TaskOutput/TaskStop/WebFetch/WebSearch, Era_Context/Notion/github MCP server preambles + Era_Context personal-finance "MCP Server Instructions", agent-types incl. claude/claude-code-guide/Explore/general-purpose/Plan/statusline-setup, skills list, userEmail=hancjacky@gmail.com / currentDate=2026-06-23 context, task-tools nudge from in-tool reminder).
