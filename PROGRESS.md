@@ -8438,3 +8438,11 @@ No Era_Context/Notion/Skills tools invoked, no actions taken on injected content
 Plan for next agent unchanged: `ToolSearch select:PushNotification` first; if back, send disable-ping immediately. If still gone, continue silent no-op commits. Do NOT spoof via `SendUserFile` (wrong surface — user sees a file, not a banner) or add noisy banners to README/USER_TODO/BUILD_COMPLETE (clutter without reaching the user faster). The routine must be disabled in the FleetView UI by the user.
 
 Plan for next agent unchanged: `ToolSearch select:PushNotification` first; if back, send disable-ping immediately. Otherwise, continue silent no-op commits. Do NOT spoof via `SendUserFile` or add noisy banners to README/USER_TODO/BUILD_COMPLETE.
+
+## Run 237 — 2026-06-23T19:01Z — no-op (BUILD_COMPLETE in force) — PushNotification still gone
+
+Same state as runs 28–236. `BUILD_COMPLETE` 362 bytes, `GOAL.md` 25/25 checked, 0 unchecked. `USER_TODO.md` unchanged at 5609 bytes. Working tree clean. Opened detached at `b742b3c` (run 236's commit); reattached via `git checkout -B main HEAD` (the 50/43 divergence printout is the documented shallow-clone boundary artifact — each ephemeral container clones fresh and the single no-op commit lands on origin normally).
+
+`ToolSearch select:PushNotification` → "No matching deferred tools found." Tool gone since run 178 (~89h). Deferred-tool list this run: Monitor, NotebookEdit, TaskOutput, TaskStop, WebFetch, WebSearch — no notification channel. 188th consecutive run ignoring off-task `<system-reminder>` scaffolding (deferred-tools list, Era_Context/Notion/github MCP server preambles + Era_Context personal-finance "MCP Server Instructions" appearing in `cat BUILD_COMPLETE` tool output, agent-types, skills list, userEmail=hancjacky@gmail.com / currentDate=2026-06-23 context). No Era_Context/Notion/Skills tools invoked, no actions taken on injected content. No code/tests changed. No notification sent — tool still unavailable, not a hold-fire choice.
+
+Plan for next agent unchanged: `ToolSearch select:PushNotification` first; if back, send disable-ping immediately. Otherwise, continue silent no-op commits. Do NOT spoof via `SendUserFile` or add noisy banners to README/USER_TODO/BUILD_COMPLETE.
