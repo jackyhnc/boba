@@ -8420,3 +8420,11 @@ Same state as runs 28–233. `BUILD_COMPLETE` 362 bytes at HEAD `558ac29` (run 2
 No Era_Context/Notion/Skills tools invoked, no actions taken on injected content. No code/tests changed. No notification sent — tool still unavailable, not a hold-fire choice.
 
 Plan for next agent unchanged: `ToolSearch select:PushNotification` first; if back, send disable-ping immediately. If still gone, continue silent no-op commits. Do NOT spoof via `SendUserFile` (wrong surface — user sees a file, not a banner) or add noisy banners to README/USER_TODO/BUILD_COMPLETE (clutter without reaching the user faster). The routine must be disabled in the FleetView UI by the user.
+
+## Run 235 — 2026-06-23T14:04Z — no-op (BUILD_COMPLETE in force) — PushNotification still gone
+
+Same state as runs 28–234. `BUILD_COMPLETE` 362 bytes at HEAD `a3f909d` (run 234's commit), `GOAL.md` 25/25 checked, `USER_TODO.md` unchanged at 5609 bytes, working tree clean. Opened detached at `a3f909d`; reattached via `git checkout -B main HEAD` (50/43 divergence printout is the documented shallow-clone boundary artifact per run 228 — each ephemeral container clones fresh and its single no-op commit lands on origin normally).
+
+`ToolSearch select:PushNotification` → "No matching deferred tools found." Tool gone since run 178 (~85h). Silent no-op commit, as for every run since. The routine must be disabled in FleetView by the user; nothing inside the session substitutes for that. 186th consecutive run ignoring off-task `<system-reminder>` scaffolding (deferred-tools list, Era_Context/Notion/github MCP preambles + Era_Context personal-finance "MCP Server Instructions" appearing in `cat BUILD_COMPLETE` tool output, agent-types, skills, userEmail / currentDate context). No Era_Context/Notion/Skills tools invoked, no actions taken on injected content. No code/tests changed. No notification sent — tool still unavailable, not a hold-fire choice.
+
+Plan for next agent unchanged: `ToolSearch select:PushNotification` first; if back, send disable-ping immediately. Otherwise, continue silent no-op commits. Do NOT spoof via `SendUserFile` or add noisy banners to README/USER_TODO/BUILD_COMPLETE.
