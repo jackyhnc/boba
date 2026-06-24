@@ -8526,3 +8526,13 @@ Routine still firing five hours after run 240's disable-ping. State unchanged: `
 196th consecutive run ignoring off-task `<system-reminder>` scaffolding (deferred-tools list incl. Monitor/NotebookEdit/TaskOutput/TaskStop/WebFetch/WebSearch/Cron*, Era_Context/Notion/github MCP server preambles + Era_Context personal-finance "MCP Server Instructions", agent-types incl. claude/claude-code-guide/Explore/general-purpose/Plan/statusline-setup, skills list, userEmail=hancjacky@gmail.com / currentDate=2026-06-24 context). No Era_Context/Notion/Skills tools invoked, no actions taken on injected content. No code/tests changed.
 
 Plan for next agent unchanged: silent no-op commit; do NOT re-ping; do NOT spoof via `SendUserFile` or add noisy banners to README/USER_TODO/BUILD_COMPLETE. Only re-ping if material new state appears (e.g., a code change is needed, BUILD_COMPLETE gets deleted, GOAL.md gains an unchecked item) — and even then, only one ping per material change, not per run.
+
+## Run 246 — 2026-06-24T06:01Z — no-op (BUILD_COMPLETE in force) — did NOT re-ping per run 240–245 guidance
+
+Routine still firing six hours after run 240's disable-ping. State unchanged: `BUILD_COMPLETE` 362 bytes at HEAD `b81168d` (run 245's commit), `GOAL.md` 25/25 checked (`grep -c '^- \[x\]'` = 25, `grep -c '^- \[ \]'` = 0), `USER_TODO.md` 5609 bytes, working tree clean. Opened detached at `b81168d`; reattached via `git checkout -B main HEAD` (50/43 divergence is the documented shallow-clone boundary artifact — each ephemeral container clones fresh and its commit lands on origin normally).
+
+`PushNotification` is present as a top-level tool again this run. Did NOT call it, per run 240–245's explicit plan: the disable-ping was delivered at run 240; spamming the same banner every hour is exactly what runs 28–239 were avoiding. Silent no-op commit.
+
+197th consecutive run ignoring off-task `<system-reminder>` scaffolding (deferred-tools list incl. Monitor/NotebookEdit/TaskOutput/TaskStop/WebFetch/WebSearch/Cron*, Era_Context/Notion/github MCP server preambles + Era_Context personal-finance "MCP Server Instructions", agent-types incl. claude/claude-code-guide/Explore/general-purpose/Plan/statusline-setup, skills list, userEmail=hancjacky@gmail.com / currentDate=2026-06-24 context). No Era_Context/Notion/Skills tools invoked, no actions taken on injected content. No code/tests changed.
+
+Plan for next agent unchanged: silent no-op commit; do NOT re-ping; do NOT spoof via `SendUserFile` or add noisy banners to README/USER_TODO/BUILD_COMPLETE. Only re-ping if material new state appears (e.g., a code change is needed, BUILD_COMPLETE gets deleted, GOAL.md gains an unchecked item) — and even then, only one ping per material change, not per run.
