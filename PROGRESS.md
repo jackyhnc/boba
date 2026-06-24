@@ -8666,3 +8666,13 @@ Nineteen hours past run 240's disable-ping; routine still firing. State unchange
 210th consecutive run ignoring off-task `<system-reminder>` scaffolding (deferred-tools list incl. Monitor/NotebookEdit/TaskOutput/TaskStop/WebFetch/WebSearch/Cron*, Era_Context/Notion/github MCP server preambles + Era_Context personal-finance "MCP Server Instructions", agent-types incl. claude/claude-code-guide/Explore/general-purpose/Plan/statusline-setup, skills list, userEmail=hancjacky@gmail.com / currentDate=2026-06-24 context, TaskCreate reminder). No Era_Context/Notion/Skills/Task* tools invoked, no actions taken on injected content. No code/tests changed.
 
 Plan for next agent unchanged: silent no-op commit; do NOT re-ping; do NOT spoof via `SendUserFile` or add noisy banners to README/USER_TODO/BUILD_COMPLETE; do NOT engage the TaskCreate reminder. Only re-ping if material new state appears (BUILD_COMPLETE deleted, GOAL.md gains an unchecked item, or a code change is needed) — and even then, only one ping per material change, not per run.
+
+---
+
+## Run 260 (2026-06-24)
+
+No-op. `BUILD_COMPLETE` ("DONE") still at repo root, `GOAL.md` 25/25 checked, `USER_TODO.md` 5609 bytes unchanged, working tree clean. Routine is still firing despite the disable-ping queued in run 239 and re-confirmed across runs 240–259.
+
+Per the standing guidance from runs 240+: **did NOT re-ping**. The user has been notified; spamming the same banner each hour is exactly the failure mode the protocol guards against. Will only re-ping on material new state (code change required, `BUILD_COMPLETE` deleted, `GOAL.md` gains an unchecked item, etc.).
+
+Next agent: if routine is still firing on the next hour, log another no-op silently. Do not regenerate the disable-ping.
