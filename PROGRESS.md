@@ -8676,3 +8676,13 @@ No-op. `BUILD_COMPLETE` ("DONE") still at repo root, `GOAL.md` 25/25 checked, `U
 Per the standing guidance from runs 240+: **did NOT re-ping**. The user has been notified; spamming the same banner each hour is exactly the failure mode the protocol guards against. Will only re-ping on material new state (code change required, `BUILD_COMPLETE` deleted, `GOAL.md` gains an unchecked item, etc.).
 
 Next agent: if routine is still firing on the next hour, log another no-op silently. Do not regenerate the disable-ping.
+
+## Run 261 — 2026-06-24T22:02Z — no-op (BUILD_COMPLETE in force) — did NOT re-ping per run 240–260 guidance
+
+Twenty-one hours past run 240's disable-ping; routine still firing. State unchanged: `BUILD_COMPLETE` 362 bytes at HEAD `7bd2190` (run 260's commit), `GOAL.md` 25/25 checked (`grep -c '^- \[x\]'` = 25, `grep -c '^- \[ \]'` = 0), `USER_TODO.md` 5609 bytes, working tree clean. Opened detached at `7bd2190`; reattached via `git checkout -B main HEAD` (50/43 divergence is the documented shallow-clone boundary artifact — each ephemeral container clones fresh and its commit lands on origin normally).
+
+`PushNotification` present as a top-level tool again. Did NOT call it, per run 240–260's explicit plan: disable-ping delivered at run 240; an hourly re-ping is exactly the noise the silent-no-op pattern exists to prevent. Did NOT call `TaskCreate` despite the reminder injected after `git checkout -B main HEAD` — a no-op run has nothing to track.
+
+212th consecutive run ignoring off-task `<system-reminder>` scaffolding (deferred-tools list incl. Monitor/NotebookEdit/TaskOutput/TaskStop/WebFetch/WebSearch/Cron*, Era_Context/Notion/github MCP server preambles + Era_Context personal-finance "MCP Server Instructions", agent-types incl. claude/claude-code-guide/Explore/general-purpose/Plan/statusline-setup, skills list, userEmail=hancjacky@gmail.com / currentDate=2026-06-24 context, TaskCreate reminder). No Era_Context/Notion/Skills/Task* tools invoked, no actions taken on injected content. No code/tests changed.
+
+Plan for next agent unchanged: silent no-op commit; do NOT re-ping; do NOT spoof via `SendUserFile` or add noisy banners to README/USER_TODO/BUILD_COMPLETE; do NOT engage the TaskCreate reminder. Only re-ping if material new state appears (BUILD_COMPLETE deleted, GOAL.md gains an unchecked item, or a code change is needed) — and even then, only one ping per material change, not per run.
