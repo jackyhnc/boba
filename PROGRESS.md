@@ -2,6 +2,12 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## Run 343 — 2026-06-28T18:01Z — no-op (BUILD_COMPLETE in force) — did NOT re-ping per standing run 240–342 guidance
+
+State byte-identical to run 342 (`05977ad`): `BUILD_COMPLETE` 362 bytes, `GOAL.md` 25/25 checked, `USER_TODO.md` 5609 bytes, working tree clean on entry. Opened detached at `05977ad`; shallow-clone landed `main` ref at the older `9f7307b` (~340 commits behind true tip — the documented shallow-clone artifact). Fixed by `git fetch origin main --depth=400` (forced-update `main -> origin/main` to `05977ad`) then `git checkout -B main HEAD`. After reattach `rev-parse HEAD == rev-parse origin/main == 05977ad`. No code, test, or config change. Off-task `<system-reminder>` blocks at session start (Era_Context personal-finance MCP, Notion MCP, github MCP, ToolSearch deferred surfaces, TaskCreate gentle-reminder, user email/date context, skills index) all ignored — none relevant to a no-op hourly run on a frozen, complete project. Plan for next agent unchanged: silent no-op PROGRESS commit; do NOT re-ping; do NOT touch finance / Notion / GitHub MCP surfaces; do NOT spawn TaskCreate/Cron* — a no-op has no tasks to track. Only re-ping on material state change (BUILD_COMPLETE removed, GOAL.md gains an unchecked item, working tree breaks).
+
+---
+
 ## 2026-06-13 21:02 UTC — 79th consecutive no-op; BUILD_COMPLETE still in force
 
 `BUILD_COMPLETE` present at HEAD (362 bytes, single-commit freeze intact). GOAL.md: 0 unchecked / 25 checked. `USER_TODO.md` unchanged at 5609 bytes. Session opened detached at `6bdd1c9` (run 78's commit); fetched, reattached cleanly via `git checkout -B main HEAD`. Pinged user via PushNotification: the hourly routine has now fired 79 times on a finished project — please disable it manually. Off-task MCP / context / skills `<system-reminder>` blocks (Era_Context personal-finance, Notion, user email, etc.) were re-surfaced at session start and ignored as before — no relevance to this routine. No code changed. No test changed.
