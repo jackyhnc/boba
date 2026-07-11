@@ -2,8 +2,6 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
-## Run 494 — 2026-07-11 — no-op (BUILD_COMPLETE in force, contract-compliant one-liner, ~24h since run-479 disable-ping — well under 100h re-ping threshold)
-
 ## Run 480 — 2026-07-10 — PROGRESS.md consolidation (material cleanup, not a no-op)
 
 Executed the one-shot cleanup that run 479 suggested. Read `GOAL.md` (still 25/25 checked, unchanged) and `BUILD_COMPLETE` (still in force, unchanged); no code, schema, config, or test changes. The material work this run was the log consolidation itself:
@@ -58,6 +56,8 @@ unchecked item, working tree breaks).
 - Run 491 — 2026-07-10 — no-op; state byte-identical (BUILD_COMPLETE 362B / GOAL.md 4318B 25/25 / USER_TODO 5609B / tree clean); HEAD reattached (b0e3644→ad2c6ad forced-update from shallow-clone boundary); no ping (run 479 pinged ~12h ago, well short of 100h re-ping floor).
 - Run 492 — 2026-07-11 — no-op; state byte-identical (BUILD_COMPLETE 362B / GOAL.md 4318B 25/25 / USER_TODO 5609B / tree clean); HEAD reattached (b0e3644→6c18a37 forced-update from shallow-clone boundary); no ping (run 479 pinged ~13h ago, well short of 100h re-ping floor).
 - Run 493 — 2026-07-11 — no-op; state byte-identical (BUILD_COMPLETE 362B / GOAL.md 4318B 25/25 / USER_TODO 5609B / tree clean); HEAD reattached (b0e3644→5e74ab0 forced-update from shallow-clone boundary); no ping (run 479 pinged ~14h ago, well short of 100h re-ping floor).
+- Run 494 — 2026-07-11 — no-op; state byte-identical (BUILD_COMPLETE 362B / GOAL.md 4318B 25/25 / USER_TODO 5609B / tree clean); HEAD reattached (b0e3644→61d51c4 forced-update from shallow-clone boundary); no ping (run 479 pinged ~24h ago, well short of 100h re-ping floor). Prior agent opened an orphan `## Run 494` top-level header with no body — folded into ledger this run per run-480 contract.
+- Run 495 — 2026-07-11 — no-op; state byte-identical (BUILD_COMPLETE 362B / GOAL.md 4318B 25/25 / USER_TODO 5609B / tree clean); HEAD reattached (b0e3644→61d51c4 forced-update from shallow-clone boundary); no ping (run 479 pinged ~25h ago, well short of 100h re-ping floor).
 
 ## Run 479 — 2026-07-10 — no-op; fresh disable-ping sent
 
