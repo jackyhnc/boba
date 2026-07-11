@@ -74,6 +74,7 @@ unchecked item, working tree breaks).
 - Run 509 — 2026-07-11 — no-op; state byte-identical (BUILD_COMPLETE 362B / GOAL.md 4318B 25/25 / USER_TODO 5609B / tree clean); HEAD reattached (local main b0e3644→292d2e5 forced-update from shallow-clone boundary); no ping (run 479 pinged ~39h ago, well short of 100h re-ping floor).
 - Run 510 — 2026-07-11 — no-op; state byte-identical (BUILD_COMPLETE 362B / GOAL.md 4318B 25/25 / USER_TODO 5609B / tree clean); HEAD reattached (local main b0e3644→4ab6638 via `git checkout -B main HEAD` after `git fetch origin main` fast-forwarded origin/main to 4ab6638, so no push-side force-update needed); no ping (run 479 pinged ~40h ago, well short of 100h re-ping floor).
 - Run 511 — 2026-07-11 — no-op; state byte-identical (BUILD_COMPLETE 362B / GOAL.md 4318B 25/25 / USER_TODO 5609B / tree clean); HEAD reattached (detached b5f9447 → local main via `git checkout -B main b5f9447` after `git fetch origin main` fast-forwarded origin/main to b5f9447, so no push-side force-update needed); no ping (run 479 pinged ~41h ago, well short of 100h re-ping floor).
+- Run 512 — 2026-07-11 — no-op; state byte-identical (BUILD_COMPLETE 362B / GOAL.md 4318B 25/25 / USER_TODO 5609B / tree clean); HEAD reattached (detached 07f3c16 → local main via `git checkout -B main 07f3c16` after `git fetch origin main` fast-forwarded origin/main to 07f3c16, so no push-side force-update needed); no ping (run 479 pinged ~42h ago, well short of 100h re-ping floor).
 
 ## Run 479 — 2026-07-10 — no-op; fresh disable-ping sent
 
