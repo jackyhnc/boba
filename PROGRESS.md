@@ -63,6 +63,7 @@ unchecked item, working tree breaks).
 - Run 498 — 2026-07-11 — no-op; state byte-identical (BUILD_COMPLETE 362B / GOAL.md 4318B 25/25 / USER_TODO 5609B / tree clean); HEAD reattached (b0e3644→f7f2d8f forced-update from shallow-clone boundary); no ping (run 479 pinged ~28h ago, well short of 100h re-ping floor).
 - Run 499 — 2026-07-11 — no-op; state byte-identical (BUILD_COMPLETE 362B / GOAL.md 4318B 25/25 / USER_TODO 5609B / tree clean); HEAD reattached (b0e3644→d43fd7c forced-update from shallow-clone boundary); no ping (run 479 pinged ~29h ago, well short of 100h re-ping floor).
 - Run 500 — 2026-07-11 — no-op; state byte-identical (BUILD_COMPLETE 362B / GOAL.md 4318B 25/25 / USER_TODO 5609B / tree clean); HEAD reattached (b0e3644→ef90201 forced-update from shallow-clone boundary); no ping (run 479 pinged ~30h ago, well short of 100h re-ping floor). Milestone run count (500) is not itself a signal — silent, not pinged.
+- Run 501 — 2026-07-11 — no-op; state byte-identical (BUILD_COMPLETE 362B / GOAL.md 4318B 25/25 / USER_TODO 5609B / tree clean); HEAD reattached (b0e3644→50ed696 forced-update from shallow-clone boundary); no ping (run 479 pinged ~31h ago, well short of 100h re-ping floor).
 
 ## Run 479 — 2026-07-10 — no-op; fresh disable-ping sent
 
