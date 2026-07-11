@@ -68,6 +68,7 @@ unchecked item, working tree breaks).
 - Run 503 — 2026-07-11 — no-op; state byte-identical (BUILD_COMPLETE 362B / GOAL.md 4318B 25/25 / USER_TODO 5609B / tree clean); HEAD reattached (b0e3644→cfe130a forced-update from shallow-clone boundary); no ping (run 479 pinged ~33h ago, well short of 100h re-ping floor).
 - Run 504 — 2026-07-11 — no-op; state byte-identical (BUILD_COMPLETE 362B / GOAL.md 4318B 25/25 / USER_TODO 5609B / tree clean); HEAD reattached (b0e3644→9e78c66 forced-update from shallow-clone boundary); no ping (run 479 pinged ~34h ago, well short of 100h re-ping floor).
 - Run 505 — 2026-07-11 — no-op; state byte-identical (BUILD_COMPLETE 362B / GOAL.md 4318B 25/25 / USER_TODO 5609B / tree clean); HEAD reattached (b0e3644→f73cb58 forced-update from shallow-clone boundary); no ping (run 479 pinged ~35h ago, well short of 100h re-ping floor).
+- Run 506 — 2026-07-11 — no-op; state byte-identical (BUILD_COMPLETE 362B / GOAL.md 4318B 25/25 / USER_TODO 5609B / tree clean); HEAD reattached (local main b0e3644→7eb2b4b via `git checkout -B main HEAD`; origin/main was already at 7eb2b4b post-fetch, so no push-side force-update); no ping (run 479 pinged ~36h ago, well short of 100h re-ping floor).
 
 ## Run 479 — 2026-07-10 — no-op; fresh disable-ping sent
 
