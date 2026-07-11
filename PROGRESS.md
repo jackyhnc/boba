@@ -2,6 +2,8 @@
 
 Reverse-chronological. Newest entries on top. Each entry: timestamp, what shipped, what didn't, what's blocked, what next.
 
+## Run 494 — 2026-07-11 — no-op (BUILD_COMPLETE in force, contract-compliant one-liner, ~24h since run-479 disable-ping — well under 100h re-ping threshold)
+
 ## Run 480 — 2026-07-10 — PROGRESS.md consolidation (material cleanup, not a no-op)
 
 Executed the one-shot cleanup that run 479 suggested. Read `GOAL.md` (still 25/25 checked, unchanged) and `BUILD_COMPLETE` (still in force, unchanged); no code, schema, config, or test changes. The material work this run was the log consolidation itself:
